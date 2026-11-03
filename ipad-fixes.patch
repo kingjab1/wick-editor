@@ -1,0 +1,293 @@
+diff --git a/engine/src/base/Project.js b/engine/src/base/Project.js
+index 498bb9f..b017336 100644
+--- a/engine/src/base/Project.js
++++ b/engine/src/base/Project.js
+@@ -671,9 +671,9 @@ Wick.Project = class extends Wick.Base {
+         var extension = "";
+         
+         if (file.name) {
+-            extension = file.name.split('.').pop();
++            extension = '.' + file.name.split('.').pop().toLowerCase();
+         } else if (file.file && typeof file.file === 'string') {
+-            extension = file.file.split('.').pop();
++            extension = '.' + file.file.split('.').pop().toLowerCase();
+         }
+ 
+         let asset = undefined;
+diff --git a/engine/src/base/asset/SoundAsset.js b/engine/src/base/asset/SoundAsset.js
+index 940057c..d08f07a 100644
+--- a/engine/src/base/asset/SoundAsset.js
++++ b/engine/src/base/asset/SoundAsset.js
+@@ -25,7 +25,7 @@ Wick.SoundAsset = class extends Wick.FileAsset {
+     static getValidMIMETypes() {
+         let mp3Types = ['audio/mp3', 'audio/mpeg3', 'audio/x-mpeg-3', 'audio/mpeg', 'video/mpeg', 'video/x-mpeg']
+         let oggTypes = ['audio/ogg', 'video/ogg', 'application/ogg']
+-        let wavTypes = ['audio/wave', 'audio/wav', 'audio/x-wav', 'audio/x-pn-wav']
++        let wavTypes = ['audio/wave', 'audio/wav', 'audio/x-wav', 'audio/x-pn-wav', 'audio/vnd.wave', 'audio/mp4', 'audio/x-m4a', 'audio/m4a', 'audio/aac', 'audio/x-aac']
+         return mp3Types.concat(oggTypes).concat(wavTypes);
+     }
+ 
+@@ -34,7 +34,7 @@ Wick.SoundAsset = class extends Wick.FileAsset {
+      * @returns {string[]} Array of strings representing valid
+      */
+     static getValidExtensions() {
+-        return ['.mp3', '.ogg', '.wav'];
++        return ['.mp3', '.ogg', '.wav', '.m4a', '.aac'];
+     }
+ 
+     /**
+diff --git a/package.json b/package.json
+index 46a1e31..2c2aaf0 100644
+--- a/package.json
++++ b/package.json
+@@ -21,7 +21,7 @@
+     "electron-updater": "^4.2.5",
+     "file-saver": "^2.0.0",
+     "localforage": "^1.7.3",
+-    "node-sass": "^4.9.4",
++    "node-sass": "npm:sass@1.32.13",
+     "query-string": "^6.9.0",
+     "rc-slider": "^8.6.3",
+     "react": "^16.13.1",
+@@ -133,7 +133,6 @@
+   ],
+   "devDependencies": {
+     "dotenv": "^8.2.0",
+-    "electron": "^7.2.4",
+     "electron-builder": "^22.4.1",
+     "electron-builder-notarize": "^1.1.2",
+     "electron-notarize": "^0.3.0",
+@@ -147,4 +146,4 @@
+     "gulp-uglify": "^3.0.2",
+     "gh-pages": "^2.0.1"
+   }
+-}
++}
+\ No newline at end of file
+diff --git a/public/builtinlibrary/wickobjects/button.wickobj b/public/builtinlibrary/wickobjects/button.wickobj.json
+similarity index 100%
+rename from public/builtinlibrary/wickobjects/button.wickobj
+rename to public/builtinlibrary/wickobjects/button.wickobj.json
+diff --git a/public/builtinlibrary/wickobjects/checkbox.wickobj b/public/builtinlibrary/wickobjects/checkbox.wickobj.json
+similarity index 100%
+rename from public/builtinlibrary/wickobjects/checkbox.wickobj
+rename to public/builtinlibrary/wickobjects/checkbox.wickobj.json
+diff --git a/public/builtinlibrary/wickobjects/keyboardcontrol.wickobj b/public/builtinlibrary/wickobjects/keyboardcontrol.wickobj.json
+similarity index 100%
+rename from public/builtinlibrary/wickobjects/keyboardcontrol.wickobj
+rename to public/builtinlibrary/wickobjects/keyboardcontrol.wickobj.json
+diff --git a/public/builtinlibrary/wickobjects/link.wickobj b/public/builtinlibrary/wickobjects/link.wickobj.json
+similarity index 100%
+rename from public/builtinlibrary/wickobjects/link.wickobj
+rename to public/builtinlibrary/wickobjects/link.wickobj.json
+diff --git a/public/builtinlibrary/wickobjects/multiframeclip.wickobj b/public/builtinlibrary/wickobjects/multiframeclip.wickobj.json
+similarity index 100%
+rename from public/builtinlibrary/wickobjects/multiframeclip.wickobj
+rename to public/builtinlibrary/wickobjects/multiframeclip.wickobj.json
+diff --git a/public/builtinlibrary/wickobjects/slider.wickobj b/public/builtinlibrary/wickobjects/slider.wickobj.json
+similarity index 100%
+rename from public/builtinlibrary/wickobjects/slider.wickobj
+rename to public/builtinlibrary/wickobjects/slider.wickobj.json
+diff --git a/public/builtinlibrary/wickobjects/textinput.wickobj b/public/builtinlibrary/wickobjects/textinput.wickobj.json
+similarity index 100%
+rename from public/builtinlibrary/wickobjects/textinput.wickobj
+rename to public/builtinlibrary/wickobjects/textinput.wickobj.json
+diff --git a/public/builtinlibrary/wickobjects/vcam.wickobj b/public/builtinlibrary/wickobjects/vcam.wickobj.json
+similarity index 100%
+rename from public/builtinlibrary/wickobjects/vcam.wickobj
+rename to public/builtinlibrary/wickobjects/vcam.wickobj.json
+diff --git a/public/corelibs/video/worker-asm.js b/public/corelibs/video/worker-asm.js
+index 15dc502..366b047 100644
+--- a/public/corelibs/video/worker-asm.js
++++ b/public/corelibs/video/worker-asm.js
+@@ -1,4 +1,16 @@
+-importScripts('ffmpeg.js');
++// ffmpeg.js is split in two so each file stays under the host's size limit.
++importScripts('ffmpeg.part1.js', 'ffmpeg.part2.js');
++(function () {
++  var code = self.__ffsrc.join('');
++  self.__ffsrc = null;
++  try {
++    var url = URL.createObjectURL(new Blob([code], {type: 'text/javascript'}));
++    importScripts(url);
++    URL.revokeObjectURL(url);
++  } catch (e) {
++    (0, eval)(code);
++  }
++})();
+ 
+ var now = Date.now;
+ 
+diff --git a/public/corelibs/wick-engine/wickengine.js b/public/corelibs/wick-engine/wickengine.js
+index 9566efc..a47dcf4 100644
+--- a/public/corelibs/wick-engine/wickengine.js
++++ b/public/corelibs/wick-engine/wickengine.js
+@@ -50602,9 +50602,9 @@ Wick.Project = class extends Wick.Base {
+     var extension = "";
+ 
+     if (file.name) {
+-      extension = file.name.split('.').pop();
++      extension = '.' + file.name.split('.').pop().toLowerCase();
+     } else if (file.file && typeof file.file === 'string') {
+-      extension = file.file.split('.').pop();
++      extension = '.' + file.file.split('.').pop().toLowerCase();
+     }
+ 
+     let asset = undefined;
+@@ -55194,7 +55194,7 @@ Wick.SoundAsset = class extends Wick.FileAsset {
+   static getValidMIMETypes() {
+     let mp3Types = ['audio/mp3', 'audio/mpeg3', 'audio/x-mpeg-3', 'audio/mpeg', 'video/mpeg', 'video/x-mpeg'];
+     let oggTypes = ['audio/ogg', 'video/ogg', 'application/ogg'];
+-    let wavTypes = ['audio/wave', 'audio/wav', 'audio/x-wav', 'audio/x-pn-wav'];
++    let wavTypes = ['audio/wave', 'audio/wav', 'audio/x-wav', 'audio/x-pn-wav', 'audio/vnd.wave', 'audio/mp4', 'audio/x-m4a', 'audio/m4a', 'audio/aac', 'audio/x-aac'];
+     return mp3Types.concat(oggTypes).concat(wavTypes);
+   }
+   /**
+@@ -55204,7 +55204,7 @@ Wick.SoundAsset = class extends Wick.FileAsset {
+ 
+ 
+   static getValidExtensions() {
+-    return ['.mp3', '.ogg', '.wav'];
++    return ['.mp3', '.ogg', '.wav', '.m4a', '.aac'];
+   }
+   /**
+    * Creates a new SoundAsset.
+diff --git a/public/index.html b/public/index.html
+index 8a95456..fe60cc2 100644
+--- a/public/index.html
++++ b/public/index.html
+@@ -5,7 +5,6 @@
+     <link rel="shortcut icon" href="%PUBLIC_URL%/favicon.ico">
+     <meta name="viewport" content="width=device-width, initial-scale=1, shrink-to-fit=no">
+     <meta name="theme-color" content="#000000">
+-    <script async defer data-domain="wickeditor.com" src="https://plausible.io/js/plausible.hash.js"></script>
+     <!--
+       manifest.json provides metadata used when your web app is added to the
+       homescreen on Android. See https://developers.google.com/web/fundamentals/web-app-manifest/
+diff --git a/src/Editor/Editor.jsx b/src/Editor/Editor.jsx
+index f4c1ad4..536eaa4 100644
+--- a/src/Editor/Editor.jsx
++++ b/src/Editor/Editor.jsx
+@@ -160,6 +160,7 @@ class Editor extends EditorCore {
+        */
+       window.warnBeforeSave = (args) => {this.openWarningModal(args)};
+     }
++    window.alertWickSave = (msg) => {this.toast(msg, 'error')};
+ 
+     // Wick Project File Input
+     this.openProjectFileFromClient = window.createFileInput({
+diff --git a/src/Editor/Modals/BuiltinLibrary/BuiltinLibrary.jsx b/src/Editor/Modals/BuiltinLibrary/BuiltinLibrary.jsx
+index d30e413..1ef45ff 100644
+--- a/src/Editor/Modals/BuiltinLibrary/BuiltinLibrary.jsx
++++ b/src/Editor/Modals/BuiltinLibrary/BuiltinLibrary.jsx
+@@ -62,7 +62,7 @@ class BuiltinLibrary extends Component {
+ 
+   //Fetch file, add to builtinPreviews
+   importForPreview = (asset, callback) => {
+-    var path = BuiltinLibrary.ROOT_ASSET_PATH + asset.file;
++    var path = BuiltinLibrary.ROOT_ASSET_PATH + asset.file + (asset.file.endsWith('.wickobj') ? '.json' : '');
+ 
+     fetch (path)
+     .then((response) => response.blob())
+diff --git a/src/Editor/Util/WickInput/WickButton/WickButton.jsx b/src/Editor/Util/WickInput/WickButton/WickButton.jsx
+index 6c1b02e..f440557 100644
+--- a/src/Editor/Util/WickInput/WickButton/WickButton.jsx
++++ b/src/Editor/Util/WickInput/WickButton/WickButton.jsx
+@@ -1,5 +1,5 @@
+ import React, { useState } from 'react';
+-import { isMobile } from 'react-device-detect';
++
+ 
+ let classNames = require('classnames');
+ 
+@@ -42,8 +42,9 @@ export default function WickButton(props) {
+   return (
+     <button
+       {...props.buttonProps}
+-      onTouchStart={isMobile ? handleClick : undefined}
+-      onClick={isMobile ? undefined : handleClick}
++      // Use click on every device. iPad Safari won't open file pickers
++      // (Open, Import) from a touchstart, only from a completed tap.
++      onClick={handleClick}
+       className={classNames("wick-button ", props.className)}>
+       {props.children}
+     </button>
+diff --git a/src/files/filehandler.js b/src/files/filehandler.js
+index 836a3cd..79943e5 100644
+--- a/src/files/filehandler.js
++++ b/src/files/filehandler.js
+@@ -47,6 +47,35 @@ export default function initializeDefaultFileHandlers() {
+      */
+     window.saveFileFromWick = (file, name, extension, successCallback, failureCallback) => {
+       const filename = name + timeStamp() + extension;
++
++      // Hosted as a Claude artifact: browser downloads are blocked, so go
++      // through the page's downloads capability instead.
++      if (window.claude && typeof window.claude.use === 'function') {
++        // .wick files are zips; the download allowlist only knows .zip.
++        let safeName = filename;
++        if (extension === '.wick' || extension === '.wickobj') safeName = filename + '.zip';
++
++        window.claude.use('downloads').then(downloads => {
++          if (!downloads) {
++            window.alertWickSave && window.alertWickSave('Saving is not available in this view. Try opening the page in Safari.');
++            failureCallback && failureCallback();
++            return;
++          }
++          return downloads.save({ filename: safeName, data: file }).then(() => {
++            successCallback && successCallback();
++          }, err => {
++            let code = err && err.code;
++            if (code === 'rejected_extension' || code === 'extension_not_enabled') {
++              window.alertWickSave && window.alertWickSave('This file type (' + extension + ') cannot be saved here.');
++            } else if (code === 'rate_limited') {
++              window.alertWickSave && window.alertWickSave('A save is already waiting for you to confirm.');
++            }
++            failureCallback && failureCallback();
++          });
++        }).catch(() => { failureCallback && failureCallback(); });
++        return;
++      }
++
+       saveAs(file, filename);
+       successCallback && successCallback() // Unfortunately, we can't check for success or failure from  browser...
+     }
+@@ -99,13 +128,35 @@ export default function initializeDefaultFileHandlers() {
+       let onChange = args.onChange || (() => { console.log("Updating Chosen Element") });
+       let input = document.createElement('input');
+       input.type = 'file';
+-      input.style.display = 'none';
+-      args.accept && (input.accept = args.accept);
+-      input.onchange = onChange;
++      // Keep the input on the page but invisible. iPad Safari ignores
++      // click() on inputs that are detached or display:none.
++      input.style.cssText = 'position:fixed;left:0;top:0;width:1px;height:1px;opacity:0;pointer-events:none;z-index:-1;';
++      input.setAttribute('tabindex', '-1');
++      input.setAttribute('aria-hidden', 'true');
++
++      // iPad/iPhone Safari greys out any file whose type it doesn't recognize
++      // (e.g. .wick projects) when an extension filter is set, so skip the
++      // filter there. iPadOS reports itself as a Mac, so check for touch too.
++      var isIOS = /iPad|iPhone|iPod/.test(navigator.userAgent) ||
++        (/Macintosh/.test(navigator.userAgent) && navigator.maxTouchPoints > 1);
++      args.accept && !isIOS && (input.accept = args.accept);
++
++      input.onchange = (e) => {
++        onChange(e);
++        // Allow picking the same file again later.
++        try { input.value = ''; } catch (err) {}
++      };
+       args.multiple && (input.multiple = "multiple");
+       input.className = "wick-editor-hidden-file-input";
+ 
++      // Safari is more reliable when the input is actually in the page.
++      function attach() {
++        if (!input.parentNode && document.body) document.body.appendChild(input);
++      }
++      if (document.body) attach(); else document.addEventListener('DOMContentLoaded', attach);
++
+       function clickInput() {
++        attach();
+         input.click();
+       }
+ 

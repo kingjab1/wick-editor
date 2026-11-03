@@ -1,3 +1,31 @@
+diff --git a/engine/gulpfile.js b/engine/gulpfile.js
+index 6be2266..85bf0f0 100644
+--- a/engine/gulpfile.js
++++ b/engine/gulpfile.js
+@@ -96,6 +96,7 @@ gulp.task("default", function() {
+       'src/base/Clip.js',
+       'src/base/Button.js',
+       'src/tools/Tool.js',
++      'src/tools/BrushTextures.js',
+       'src/tools/Brush.js',
+       'src/tools/Cursor.js',
+       'src/tools/Ellipse.js',
+diff --git a/engine/src/ToolSettings.js b/engine/src/ToolSettings.js
+index 597344c..2176c46 100644
+--- a/engine/src/ToolSettings.js
++++ b/engine/src/ToolSettings.js
+@@ -108,6 +108,11 @@ Wick.ToolSettings = class {
+             name: 'brushMode',
+             default: 'none',
+             options: ['none', 'behind', 'inside']
++        }, {
++            type: "choice",
++            name: 'brushTexture',
++            default: 'none',
++            options: ['none', 'crayon', 'chalk', 'charcoal', 'spray']
+         }];
+     }
+ 
 diff --git a/engine/src/base/Project.js b/engine/src/base/Project.js
 index 498bb9f..b017336 100644
 --- a/engine/src/base/Project.js
@@ -36,6 +64,285 @@ index 940057c..d08f07a 100644
      }
  
      /**
+diff --git a/engine/src/tools/Brush.js b/engine/src/tools/Brush.js
+index 4193108..4d11883 100644
+--- a/engine/src/tools/Brush.js
++++ b/engine/src/tools/Brush.js
+@@ -133,6 +133,7 @@ Wick.Tools.Brush = class extends Wick.Tool {
+         this.croquis.setToolStabilizeLevel(this.BRUSH_STABILIZER_LEVEL);
+         this.croquis.setToolStabilizeWeight((this.getSetting('brushStabilizerWeight') / 100.0) + 0.3);
+         this.croquis.setToolStabilizeInterval(1);
++        this._setupBrushTexture();
+ 
+         // Forward mouse event to croquis canvas
+         var point = this._croquisToPaperPoint(e.point);
+@@ -154,6 +155,7 @@ Wick.Tools.Brush = class extends Wick.Tool {
+         this._updateStrokeBounds(point);
+         try {
+             this._updateLastMouseState(point, this.pressure);
++            this._nextSprayStamp();
+             this.croquis.move(point.x, point.y, this.pressure);
+         } catch (e) {
+             this.handleBrushError(e);
+@@ -351,9 +353,14 @@ Wick.Tools.Brush = class extends Wick.Tool {
+               strokeBounds.x, strokeBounds.y,
+               strokeBounds.width, strokeBounds.height,
+               0, 0, croppedCanvas.width, croppedCanvas.height);
++            // Bake the brush texture grain into the stroke before tracing it
++            var grainOffset = this._grainOffset();
++            Wick.BrushTextures.applyGrain(croppedCanvas, this._strokeTexture,
++                strokeBounds.x + grainOffset.x, strokeBounds.y + grainOffset.y);
++
+ 
+             // Run potrace and add the resulting path to the project
+-            var svg = potrace.fromImage(croppedCanvas).toSVG(1/this.POTRACE_RESOLUTION/this.paper.view.zoom);
++            var svg = potrace.fromImage(croppedCanvas, Wick.BrushTextures.potraceOptions(this._strokeTexture)).toSVG(1/this.POTRACE_RESOLUTION/this.paper.view.zoom);
+             var potracePath = this.paper.project.importSVG(svg);
+ 
+             potracePath.fillColor = this.getSetting('fillColor').rgba;
+@@ -431,4 +438,49 @@ Wick.Tools.Brush = class extends Wick.Tool {
+         result.remove();
+         return result;
+     }
++
++    /* Set up the textured brush tip (if any) for the stroke that's starting. */
++    _setupBrushTexture () {
++        var texture = this.getSetting('brushTexture') || 'none';
++        if (Wick.BrushTextures.NAMES.indexOf(texture) === -1) texture = 'none';
++        this._strokeTexture = texture;
++
++        if (texture === 'spray') {
++            this._sprayStamps = Wick.BrushTextures.makeSprayStamps(this._getRealBrushSize());
++            this._sprayIndex = 0;
++            this.croquisBrush.setImage(this._sprayStamps[0]);
++            this.croquisBrush.setSpacing(0.3);
++            this.croquisBrush.setNormalSpread(0.25);
++            this.croquisBrush.setTangentSpread(0.25);
++        } else {
++            this._sprayStamps = null;
++            this.croquisBrush.setImage(null);
++            this.croquisBrush.setNormalSpread(0);
++            this.croquisBrush.setTangentSpread(0);
++        }
++
++        // Show the grain on the stroke while it's being drawn
++        var ratio = 1;
++        if (this.croquisDOMElement.clientWidth && this.croquis.getCanvasWidth()) {
++            ratio = this.croquisDOMElement.clientWidth / this.croquis.getCanvasWidth();
++        }
++        var offset = this._grainOffset();
++        Wick.BrushTextures.setPreviewMask(this.croquisDOMElement, texture, offset.x, offset.y, ratio);
++    }
++
++    /* Swap between spray stamps so a stroke doesn't show a repeating dot pattern. */
++    _nextSprayStamp () {
++        if (!this._sprayStamps) return;
++        this._sprayIndex = (this._sprayIndex + 1) % this._sprayStamps.length;
++        this.croquisBrush.setImage(this._sprayStamps[this._sprayIndex]);
++    }
++
++    /* Where the croquis canvas origin sits in grain space, so grain stays fixed to the drawing. */
++    _grainOffset () {
++        var zoom = this.paper.view.zoom;
++        return {
++            x: this.paper.view.bounds.x * zoom,
++            y: this.paper.view.bounds.y * zoom,
++        };
++    }
+ }
+diff --git a/engine/src/tools/BrushTextures.js b/engine/src/tools/BrushTextures.js
+new file mode 100644
+index 0000000..541125a
+--- /dev/null
++++ b/engine/src/tools/BrushTextures.js
+@@ -0,0 +1,187 @@
++/*
++ * Textured brush tips for the Wick brush tool.
++ *
++ * The brush paints a stroke into a raster canvas (Croquis) and then traces it
++ * into a vector shape with potrace. Grain textures (crayon, chalk, charcoal)
++ * are applied as a mask to that raster just before tracing, so the grain
++ * becomes part of the vector shape. Spray paints with randomized dot stamps.
++ *
++ * Everything is generated procedurally from a fixed seed, so the grain looks
++ * the same every time the editor loads.
++ */
++
++Wick.BrushTextures = (function () {
++    var TILE = 256;
++    var NAMES = ['none', 'crayon', 'chalk', 'charcoal', 'spray'];
++    var GRAINS = ['crayon', 'chalk', 'charcoal'];
++
++    var tileCache = {};
++    var tileURLCache = {};
++
++    function rng (seed) {
++        return function () {
++            seed |= 0; seed = seed + 0x6D2B79F5 | 0;
++            var t = Math.imul(seed ^ seed >>> 15, 1 | seed);
++            t = t + Math.imul(t ^ t >>> 7, 61 | t) ^ t;
++            return ((t ^ t >>> 14) >>> 0) / 4294967296;
++        };
++    }
++
++    /* Seamless value noise over a TILE x TILE square. cellX/cellY = cell size in px. */
++    function makeNoise (seed, cellX, cellY) {
++        var rand = rng(seed);
++        var gw = Math.max(1, Math.round(TILE / cellX));
++        var gh = Math.max(1, Math.round(TILE / cellY));
++        var grid = new Float32Array(gw * gh);
++        for (var i = 0; i < grid.length; i++) grid[i] = rand();
++        var sx = gw / TILE, sy = gh / TILE;
++        return function (x, y) {
++            var fx = x * sx, fy = y * sy;
++            var x0 = Math.floor(fx), y0 = Math.floor(fy);
++            var tx = fx - x0, ty = fy - y0;
++            tx = tx * tx * (3 - 2 * tx);
++            ty = ty * ty * (3 - 2 * ty);
++            var x1 = (x0 + 1) % gw, y1 = (y0 + 1) % gh;
++            x0 = x0 % gw; y0 = y0 % gh;
++            var a = grid[y0 * gw + x0], b = grid[y0 * gw + x1];
++            var c = grid[y1 * gw + x0], d = grid[y1 * gw + x1];
++            return (a + (b - a) * tx) + ((c + (d - c) * tx) - (a + (b - a) * tx)) * ty;
++        };
++    }
++
++    /* Returns 0..1 grain value for each texture. Pixels above the threshold are kept. */
++    var RECIPES = {
++        crayon: function () {
++            var fine = makeNoise(11, 3, 3), mid = makeNoise(12, 8, 8), tooth = makeNoise(13, 4, 12);
++            return { threshold: 0.33, value: function (x, y) {
++                return 0.4 * fine(x, y) + 0.35 * mid(x, y) + 0.25 * tooth(x, y);
++            }};
++        },
++        chalk: function () {
++            var fine = makeNoise(21, 2, 2), mid = makeNoise(22, 6, 6), coarse = makeNoise(23, 16, 16);
++            return { threshold: 0.47, value: function (x, y) {
++                return 0.4 * fine(x, y) + 0.35 * mid(x, y) + 0.25 * coarse(x, y);
++            }};
++        },
++        charcoal: function () {
++            var streak = makeNoise(31, 32, 3), blotch = makeNoise(32, 16, 10), fine = makeNoise(33, 3, 3);
++            return { threshold: 0.40, value: function (x, y) {
++                return 0.4 * streak(x, y) + 0.3 * blotch(x, y) + 0.3 * fine(x, y);
++            }};
++        },
++    };
++
++    /* A TILE x TILE canvas, opaque where paint stays, transparent where grain shows through. */
++    function getTile (name) {
++        if (tileCache[name]) return tileCache[name];
++        var recipe = RECIPES[name]();
++        var canvas = document.createElement('canvas');
++        canvas.width = TILE;
++        canvas.height = TILE;
++        var ctx = canvas.getContext('2d');
++        var img = ctx.createImageData(TILE, TILE);
++        for (var y = 0; y < TILE; y++) {
++            for (var x = 0; x < TILE; x++) {
++                var i = (y * TILE + x) * 4;
++                img.data[i] = img.data[i + 1] = img.data[i + 2] = 255;
++                img.data[i + 3] = recipe.value(x, y) > recipe.threshold ? 255 : 0;
++            }
++        }
++        ctx.putImageData(img, 0, 0);
++        tileCache[name] = canvas;
++        return canvas;
++    }
++
++    function getTileURL (name) {
++        if (!tileURLCache[name]) tileURLCache[name] = getTile(name).toDataURL('image/png');
++        return tileURLCache[name];
++    }
++
++    function isGrain (name) {
++        return GRAINS.indexOf(name) !== -1;
++    }
++
++    /*
++     * Erase the grain out of a canvas holding a painted stroke.
++     * offsetX/offsetY: where this canvas's (0,0) sits in the anchored grain space,
++     * so the grain stays put on the drawing instead of following each stroke.
++     */
++    function applyGrain (canvas, name, offsetX, offsetY) {
++        if (!isGrain(name)) return;
++        var ctx = canvas.getContext('2d');
++        var pattern = ctx.createPattern(getTile(name), 'repeat');
++        var ox = ((Math.round(offsetX) % TILE) + TILE) % TILE;
++        var oy = ((Math.round(offsetY) % TILE) + TILE) % TILE;
++        ctx.save();
++        ctx.globalCompositeOperation = 'destination-in';
++        ctx.translate(-ox, -oy);
++        ctx.fillStyle = pattern;
++        ctx.fillRect(ox, oy, canvas.width, canvas.height);
++        ctx.restore();
++    }
++
++    /* Show the grain on the live (pre-trace) stroke using a CSS mask. */
++    function setPreviewMask (element, name, offsetX, offsetY, ratio) {
++        var style = element.style;
++        if (!isGrain(name)) {
++            style.webkitMaskImage = style.maskImage = '';
++            return;
++        }
++        ratio = ratio || 1;
++        var url = 'url(' + getTileURL(name) + ')';
++        var ox = ((Math.round(offsetX) % TILE) + TILE) % TILE;
++        var oy = ((Math.round(offsetY) % TILE) + TILE) % TILE;
++        style.webkitMaskImage = style.maskImage = url;
++        style.webkitMaskSize = style.maskSize = (TILE * ratio) + 'px ' + (TILE * ratio) + 'px';
++        style.webkitMaskRepeat = style.maskRepeat = 'repeat';
++        style.webkitMaskPosition = style.maskPosition = (-ox * ratio) + 'px ' + (-oy * ratio) + 'px';
++    }
++
++    var sprayRand = rng(4242);
++
++    /* A stamp of random dots, denser toward the middle, at the brush's pixel size. */
++    function makeSprayStamp (size) {
++        size = Math.max(4, Math.round(size));
++        var canvas = document.createElement('canvas');
++        canvas.width = canvas.height = size;
++        var ctx = canvas.getContext('2d');
++        ctx.fillStyle = '#fff';
++        var r = size / 2;
++        var dotR = Math.max(1.3, size * 0.022);
++        var count = Math.max(6, Math.round(size * 0.9));
++        for (var i = 0; i < count; i++) {
++            var a = sprayRand() * Math.PI * 2;
++            var d = Math.pow(sprayRand(), 0.75) * (r - dotR);
++            var dr = dotR * (0.7 + sprayRand() * 0.8);
++            ctx.beginPath();
++            ctx.arc(r + Math.cos(a) * d, r + Math.sin(a) * d, dr, 0, Math.PI * 2);
++            ctx.fill();
++        }
++        return canvas;
++    }
++
++    /* A few different stamps so a stroke doesn't show a repeating pattern. */
++    function makeSprayStamps (size) {
++        var stamps = [];
++        for (var i = 0; i < 6; i++) stamps.push(makeSprayStamp(size));
++        return stamps;
++    }
++
++    /* Tracing options: drop specks too small to see and simplify grainy outlines. */
++    function potraceOptions (name) {
++        if (name === 'spray') return { turdSize: 2, optTolerance: 0.4 };
++        if (isGrain(name)) return { turdSize: 4, optTolerance: 0.45 };
++        return {};
++    }
++
++    return {
++        TILE: TILE,
++        NAMES: NAMES,
++        isGrain: isGrain,
++        getTile: getTile,
++        applyGrain: applyGrain,
++        setPreviewMask: setPreviewMask,
++        makeSprayStamps: makeSprayStamps,
++        potraceOptions: potraceOptions,
++    };
++})();
 diff --git a/package.json b/package.json
 index 46a1e31..2c2aaf0 100644
 --- a/package.json
@@ -119,10 +426,33 @@ index 15dc502..366b047 100644
  var now = Date.now;
  
 diff --git a/public/corelibs/wick-engine/wickengine.js b/public/corelibs/wick-engine/wickengine.js
-index 9566efc..a47dcf4 100644
+index 9566efc..db5e3c3 100644
 --- a/public/corelibs/wick-engine/wickengine.js
 +++ b/public/corelibs/wick-engine/wickengine.js
-@@ -50602,9 +50602,9 @@ Wick.Project = class extends Wick.Base {
+@@ -34748,8 +34748,8 @@ module.exports = require('./_descriptors') ? function(object, key, value){
+ },{"./_descriptors":42,"./_object-dp":52,"./_property-desc":53}],48:[function(require,module,exports){
+ module.exports = require('./_global').document && document.documentElement;
+ },{"./_global":46}],49:[function(require,module,exports){
+-module.exports = !require('./_descriptors') && !require('./_fails')(function(){
+-  return Object.defineProperty(require('./_dom-create')('div'), 'a', {get: function(){ return 7; }}).a != 7;
++module.exports = !require('./_descriptors') && !require('./_fails')(function(){
++  return Object.defineProperty(require('./_dom-create')('div'), 'a', {get: function(){ return 7; }}).a != 7;
+ });
+ },{"./_descriptors":42,"./_dom-create":43,"./_fails":45}],50:[function(require,module,exports){
+ // fast apply, http://jsperf.lnkit.com/fast-apply/5
+@@ -46854,6 +46854,11 @@ Wick.ToolSettings = class {
+       name: 'brushMode',
+       default: 'none',
+       options: ['none', 'behind', 'inside']
++    }, {
++      type: "choice",
++      name: 'brushTexture',
++      default: 'none',
++      options: ['none', 'crayon', 'chalk', 'charcoal', 'spray']
+     }];
+   }
+   /**
+@@ -50602,9 +50607,9 @@ Wick.Project = class extends Wick.Base {
      var extension = "";
  
      if (file.name) {
@@ -134,7 +464,7 @@ index 9566efc..a47dcf4 100644
      }
  
      let asset = undefined;
-@@ -55194,7 +55194,7 @@ Wick.SoundAsset = class extends Wick.FileAsset {
+@@ -55194,7 +55199,7 @@ Wick.SoundAsset = class extends Wick.FileAsset {
    static getValidMIMETypes() {
      let mp3Types = ['audio/mp3', 'audio/mpeg3', 'audio/x-mpeg-3', 'audio/mpeg', 'video/mpeg', 'video/x-mpeg'];
      let oggTypes = ['audio/ogg', 'video/ogg', 'application/ogg'];
@@ -143,7 +473,7 @@ index 9566efc..a47dcf4 100644
      return mp3Types.concat(oggTypes).concat(wavTypes);
    }
    /**
-@@ -55204,7 +55204,7 @@ Wick.SoundAsset = class extends Wick.FileAsset {
+@@ -55204,7 +55209,7 @@ Wick.SoundAsset = class extends Wick.FileAsset {
  
  
    static getValidExtensions() {
@@ -152,6 +482,289 @@ index 9566efc..a47dcf4 100644
    }
    /**
     * Creates a new SoundAsset.
+@@ -58851,6 +58856,194 @@ Wick.Tools = {};
+  * You should have received a copy of the GNU General Public License
+  * along with Wick Engine.  If not, see <https://www.gnu.org/licenses/>.
+  */
++/*
++ * Textured brush tips for the Wick brush tool.
++ *
++ * The brush paints a stroke into a raster canvas (Croquis) and then traces it
++ * into a vector shape with potrace. Grain textures (crayon, chalk, charcoal)
++ * are applied as a mask to that raster just before tracing, so the grain
++ * becomes part of the vector shape. Spray paints with randomized dot stamps.
++ *
++ * Everything is generated procedurally from a fixed seed, so the grain looks
++ * the same every time the editor loads.
++ */
++
++Wick.BrushTextures = (function () {
++    var TILE = 256;
++    var NAMES = ['none', 'crayon', 'chalk', 'charcoal', 'spray'];
++    var GRAINS = ['crayon', 'chalk', 'charcoal'];
++
++    var tileCache = {};
++    var tileURLCache = {};
++
++    function rng (seed) {
++        return function () {
++            seed |= 0; seed = seed + 0x6D2B79F5 | 0;
++            var t = Math.imul(seed ^ seed >>> 15, 1 | seed);
++            t = t + Math.imul(t ^ t >>> 7, 61 | t) ^ t;
++            return ((t ^ t >>> 14) >>> 0) / 4294967296;
++        };
++    }
++
++    /* Seamless value noise over a TILE x TILE square. cellX/cellY = cell size in px. */
++    function makeNoise (seed, cellX, cellY) {
++        var rand = rng(seed);
++        var gw = Math.max(1, Math.round(TILE / cellX));
++        var gh = Math.max(1, Math.round(TILE / cellY));
++        var grid = new Float32Array(gw * gh);
++        for (var i = 0; i < grid.length; i++) grid[i] = rand();
++        var sx = gw / TILE, sy = gh / TILE;
++        return function (x, y) {
++            var fx = x * sx, fy = y * sy;
++            var x0 = Math.floor(fx), y0 = Math.floor(fy);
++            var tx = fx - x0, ty = fy - y0;
++            tx = tx * tx * (3 - 2 * tx);
++            ty = ty * ty * (3 - 2 * ty);
++            var x1 = (x0 + 1) % gw, y1 = (y0 + 1) % gh;
++            x0 = x0 % gw; y0 = y0 % gh;
++            var a = grid[y0 * gw + x0], b = grid[y0 * gw + x1];
++            var c = grid[y1 * gw + x0], d = grid[y1 * gw + x1];
++            return (a + (b - a) * tx) + ((c + (d - c) * tx) - (a + (b - a) * tx)) * ty;
++        };
++    }
++
++    /* Returns 0..1 grain value for each texture. Pixels above the threshold are kept. */
++    var RECIPES = {
++        crayon: function () {
++            var fine = makeNoise(11, 3, 3), mid = makeNoise(12, 8, 8), tooth = makeNoise(13, 4, 12);
++            return { threshold: 0.33, value: function (x, y) {
++                return 0.4 * fine(x, y) + 0.35 * mid(x, y) + 0.25 * tooth(x, y);
++            }};
++        },
++        chalk: function () {
++            var fine = makeNoise(21, 2, 2), mid = makeNoise(22, 6, 6), coarse = makeNoise(23, 16, 16);
++            return { threshold: 0.47, value: function (x, y) {
++                return 0.4 * fine(x, y) + 0.35 * mid(x, y) + 0.25 * coarse(x, y);
++            }};
++        },
++        charcoal: function () {
++            var streak = makeNoise(31, 32, 3), blotch = makeNoise(32, 16, 10), fine = makeNoise(33, 3, 3);
++            return { threshold: 0.40, value: function (x, y) {
++                return 0.4 * streak(x, y) + 0.3 * blotch(x, y) + 0.3 * fine(x, y);
++            }};
++        },
++    };
++
++    /* A TILE x TILE canvas, opaque where paint stays, transparent where grain shows through. */
++    function getTile (name) {
++        if (tileCache[name]) return tileCache[name];
++        var recipe = RECIPES[name]();
++        var canvas = document.createElement('canvas');
++        canvas.width = TILE;
++        canvas.height = TILE;
++        var ctx = canvas.getContext('2d');
++        var img = ctx.createImageData(TILE, TILE);
++        for (var y = 0; y < TILE; y++) {
++            for (var x = 0; x < TILE; x++) {
++                var i = (y * TILE + x) * 4;
++                img.data[i] = img.data[i + 1] = img.data[i + 2] = 255;
++                img.data[i + 3] = recipe.value(x, y) > recipe.threshold ? 255 : 0;
++            }
++        }
++        ctx.putImageData(img, 0, 0);
++        tileCache[name] = canvas;
++        return canvas;
++    }
++
++    function getTileURL (name) {
++        if (!tileURLCache[name]) tileURLCache[name] = getTile(name).toDataURL('image/png');
++        return tileURLCache[name];
++    }
++
++    function isGrain (name) {
++        return GRAINS.indexOf(name) !== -1;
++    }
++
++    /*
++     * Erase the grain out of a canvas holding a painted stroke.
++     * offsetX/offsetY: where this canvas's (0,0) sits in the anchored grain space,
++     * so the grain stays put on the drawing instead of following each stroke.
++     */
++    function applyGrain (canvas, name, offsetX, offsetY) {
++        if (!isGrain(name)) return;
++        var ctx = canvas.getContext('2d');
++        var pattern = ctx.createPattern(getTile(name), 'repeat');
++        var ox = ((Math.round(offsetX) % TILE) + TILE) % TILE;
++        var oy = ((Math.round(offsetY) % TILE) + TILE) % TILE;
++        ctx.save();
++        ctx.globalCompositeOperation = 'destination-in';
++        ctx.translate(-ox, -oy);
++        ctx.fillStyle = pattern;
++        ctx.fillRect(ox, oy, canvas.width, canvas.height);
++        ctx.restore();
++    }
++
++    /* Show the grain on the live (pre-trace) stroke using a CSS mask. */
++    function setPreviewMask (element, name, offsetX, offsetY, ratio) {
++        var style = element.style;
++        if (!isGrain(name)) {
++            style.webkitMaskImage = style.maskImage = '';
++            return;
++        }
++        ratio = ratio || 1;
++        var url = 'url(' + getTileURL(name) + ')';
++        var ox = ((Math.round(offsetX) % TILE) + TILE) % TILE;
++        var oy = ((Math.round(offsetY) % TILE) + TILE) % TILE;
++        style.webkitMaskImage = style.maskImage = url;
++        style.webkitMaskSize = style.maskSize = (TILE * ratio) + 'px ' + (TILE * ratio) + 'px';
++        style.webkitMaskRepeat = style.maskRepeat = 'repeat';
++        style.webkitMaskPosition = style.maskPosition = (-ox * ratio) + 'px ' + (-oy * ratio) + 'px';
++    }
++
++    var sprayRand = rng(4242);
++
++    /* A stamp of random dots, denser toward the middle, at the brush's pixel size. */
++    function makeSprayStamp (size) {
++        size = Math.max(4, Math.round(size));
++        var canvas = document.createElement('canvas');
++        canvas.width = canvas.height = size;
++        var ctx = canvas.getContext('2d');
++        ctx.fillStyle = '#fff';
++        var r = size / 2;
++        var dotR = Math.max(1.3, size * 0.022);
++        var count = Math.max(6, Math.round(size * 0.9));
++        for (var i = 0; i < count; i++) {
++            var a = sprayRand() * Math.PI * 2;
++            var d = Math.pow(sprayRand(), 0.75) * (r - dotR);
++            var dr = dotR * (0.7 + sprayRand() * 0.8);
++            ctx.beginPath();
++            ctx.arc(r + Math.cos(a) * d, r + Math.sin(a) * d, dr, 0, Math.PI * 2);
++            ctx.fill();
++        }
++        return canvas;
++    }
++
++    /* A few different stamps so a stroke doesn't show a repeating pattern. */
++    function makeSprayStamps (size) {
++        var stamps = [];
++        for (var i = 0; i < 6; i++) stamps.push(makeSprayStamp(size));
++        return stamps;
++    }
++
++    /* Tracing options: drop specks too small to see and simplify grainy outlines. */
++    function potraceOptions (name) {
++        if (name === 'spray') return { turdSize: 2, optTolerance: 0.4 };
++        if (isGrain(name)) return { turdSize: 4, optTolerance: 0.45 };
++        return {};
++    }
++
++    return {
++        TILE: TILE,
++        NAMES: NAMES,
++        isGrain: isGrain,
++        getTile: getTile,
++        applyGrain: applyGrain,
++        setPreviewMask: setPreviewMask,
++        makeSprayStamps: makeSprayStamps,
++        potraceOptions: potraceOptions,
++    };
++})();
++
+ Wick.Tools.Brush = class extends Wick.Tool {
+   static get CROQUIS_WAIT_AMT_MS() {
+     return 100;
+@@ -58949,7 +59142,8 @@ Wick.Tools.Brush = class extends Wick.Tool {
+     this.croquisBrush.setSpacing(this.BRUSH_POINT_SPACING);
+     this.croquis.setToolStabilizeLevel(this.BRUSH_STABILIZER_LEVEL);
+     this.croquis.setToolStabilizeWeight(this.getSetting('brushStabilizerWeight') / 100.0 + 0.3);
+-    this.croquis.setToolStabilizeInterval(1); // Forward mouse event to croquis canvas
++    this.croquis.setToolStabilizeInterval(1);
++    this._setupBrushTexture(); // Forward mouse event to croquis canvas
+ 
+     var point = this._croquisToPaperPoint(e.point);
+ 
+@@ -58975,6 +59169,8 @@ Wick.Tools.Brush = class extends Wick.Tool {
+     try {
+       this._updateLastMouseState(point, this.pressure);
+ 
++      this._nextSprayStamp();
++
+       this.croquis.move(point.x, point.y, this.pressure);
+     } catch (e) {
+       this.handleBrushError(e);
+@@ -59182,9 +59378,14 @@ Wick.Tools.Brush = class extends Wick.Tool {
+       croppedCanvas.height = strokeBounds.height;
+       if (strokeBounds.x < 0) strokeBounds.x = 0;
+       if (strokeBounds.y < 0) strokeBounds.y = 0;
+-      croppedCanvasCtx.drawImage(canvas, strokeBounds.x, strokeBounds.y, strokeBounds.width, strokeBounds.height, 0, 0, croppedCanvas.width, croppedCanvas.height); // Run potrace and add the resulting path to the project
+-
+-      var svg = potrace.fromImage(croppedCanvas).toSVG(1 / this.POTRACE_RESOLUTION / this.paper.view.zoom);
++      croppedCanvasCtx.drawImage(canvas, strokeBounds.x, strokeBounds.y, strokeBounds.width, strokeBounds.height, 0, 0, croppedCanvas.width, croppedCanvas.height);
++      // Bake the brush texture grain into the stroke before tracing it
++      var grainOffset = this._grainOffset();
++      Wick.BrushTextures.applyGrain(croppedCanvas, this._strokeTexture,
++          strokeBounds.x + grainOffset.x, strokeBounds.y + grainOffset.y);
++ // Run potrace and add the resulting path to the project
++
++      var svg = potrace.fromImage(croppedCanvas, Wick.BrushTextures.potraceOptions(this._strokeTexture)).toSVG(1 / this.POTRACE_RESOLUTION / this.paper.view.zoom);
+       var potracePath = this.paper.project.importSVG(svg);
+       potracePath.fillColor = this.getSetting('fillColor').rgba;
+       potracePath.position.x += this.paper.view.bounds.x;
+@@ -59265,6 +59466,50 @@ Wick.Tools.Brush = class extends Wick.Tool {
+     return result;
+   }
+ 
++  /* Set up the textured brush tip (if any) for the stroke that's starting. */
++  _setupBrushTexture () {
++    var texture = this.getSetting('brushTexture') || 'none';
++    if (Wick.BrushTextures.NAMES.indexOf(texture) === -1) texture = 'none';
++    this._strokeTexture = texture;
++
++    if (texture === 'spray') {
++      this._sprayStamps = Wick.BrushTextures.makeSprayStamps(this._getRealBrushSize());
++      this._sprayIndex = 0;
++      this.croquisBrush.setImage(this._sprayStamps[0]);
++      this.croquisBrush.setSpacing(0.3);
++      this.croquisBrush.setNormalSpread(0.25);
++      this.croquisBrush.setTangentSpread(0.25);
++    } else {
++      this._sprayStamps = null;
++      this.croquisBrush.setImage(null);
++      this.croquisBrush.setNormalSpread(0);
++      this.croquisBrush.setTangentSpread(0);
++    }
++
++    // Show the grain on the stroke while it's being drawn
++    var ratio = 1;
++    if (this.croquisDOMElement.clientWidth && this.croquis.getCanvasWidth()) {
++      ratio = this.croquisDOMElement.clientWidth / this.croquis.getCanvasWidth();
++    }
++    var offset = this._grainOffset();
++    Wick.BrushTextures.setPreviewMask(this.croquisDOMElement, texture, offset.x, offset.y, ratio);
++  }
++
++  /* Swap between spray stamps so a stroke doesn't show a repeating dot pattern. */
++  _nextSprayStamp () {
++    if (!this._sprayStamps) return;
++    this._sprayIndex = (this._sprayIndex + 1) % this._sprayStamps.length;
++    this.croquisBrush.setImage(this._sprayStamps[this._sprayIndex]);
++  }
++
++  /* Where the croquis canvas origin sits in grain space, so grain stays fixed to the drawing. */
++  _grainOffset () {
++    var zoom = this.paper.view.zoom;
++    return {
++      x: this.paper.view.bounds.x * zoom,
++      y: this.paper.view.bounds.y * zoom,
++    };
++  }
+ };
+ /*
+  * Copyright 2020 WICKLETS LLC
 diff --git a/public/index.html b/public/index.html
 index 8a95456..fe60cc2 100644
 --- a/public/index.html
@@ -189,6 +802,115 @@ index d30e413..1ef45ff 100644
  
      fetch (path)
      .then((response) => response.blob())
+diff --git a/src/Editor/Panels/Toolbox/ToolSettings/ToolSettings.jsx b/src/Editor/Panels/Toolbox/ToolSettings/ToolSettings.jsx
+index 96051eb..7585c76 100644
+--- a/src/Editor/Panels/Toolbox/ToolSettings/ToolSettings.jsx
++++ b/src/Editor/Panels/Toolbox/ToolSettings/ToolSettings.jsx
+@@ -28,6 +28,10 @@ class ToolSettings extends Component {
+   constructor(props) {
+     super(props);
+ 
++    this.state = {
++      showBrushTextures: false,
++    };
++
+     this.settingsFunctions = {
+       "cursor": this.renderCursorSettings,
+       "brush": this.renderBrushSettings,
+@@ -74,6 +78,7 @@ class ToolSettings extends Component {
+         {this.renderEnablePressure()}
+         {this.renderEnableRelativeBrushSize()}
+         {this.renderBrushMode()}
++        {this.renderBrushTexture()}
+       </div>
+     );
+   }
+@@ -208,6 +213,57 @@ class ToolSettings extends Component {
+     )
+   }
+ 
++  toggleBrushTextures = (state) => {
++    this.setState({
++      showBrushTextures: typeof state === 'boolean' ? state : !this.state.showBrushTextures,
++    });
++  }
++
++  renderBrushTexture = () => {
++    let textures = [
++      {name: 'Smooth', value: 'none'},
++      {name: 'Crayon', value: 'crayon'},
++      {name: 'Chalk', value: 'chalk'},
++      {name: 'Charcoal', value: 'charcoal'},
++      {name: 'Spray', value: 'spray'},
++    ];
++    let current = this.props.getToolSetting('brushTexture') || 'none';
++
++    return (
++        <div id="brush-textures-popover-button">
++          <ToolSettingsInput renderSize={this.props.renderSize}
++            name='Brush Texture'
++            icon={'brushtexture' + current}
++            type='checkbox'
++            value={this.state.showBrushTextures}
++            onChange={() => this.toggleBrushTextures()}/>
++          <PopupMenu
++            mobile={this.props.isMobile}
++            isOpen={this.state.showBrushTextures && !this.props.previewPlaying}
++            toggle={() => this.toggleBrushTextures(false)}
++            target="brush-textures-popover-button"
++            className={"more-canvas-actions-popover"}>
++            <div className="brush-modes-widget">
++              <div className='actions-container'>
++                {textures.map(texture =>
++                  <ToolSettingsInput renderSize={this.props.renderSize}
++                    key={texture.value}
++                    name={texture.name}
++                    icon={'brushtexture' + texture.value}
++                    type='checkbox'
++                    value={current === texture.value}
++                    onChange={() => {
++                      this.props.setToolSetting('brushTexture', texture.value);
++                      this.toggleBrushTextures(false);
++                    }}/>
++                )}
++              </div>
++            </div>
++          </PopupMenu>
++        </div>
++    )
++  }
++
+   renderCornerRadius = () => {
+     return (
+       <ToolSettingsInput renderSize={this.props.renderSize}
+diff --git a/src/Editor/Util/ToolIcon/ToolIcon.jsx b/src/Editor/Util/ToolIcon/ToolIcon.jsx
+index 1ff89a2..887141f 100644
+--- a/src/Editor/Util/ToolIcon/ToolIcon.jsx
++++ b/src/Editor/Util/ToolIcon/ToolIcon.jsx
+@@ -54,6 +54,11 @@ import iconRelativeBrushSize from 'resources/tool-icons/relativebrush.png';
+ import iconBrushModeNone from 'resources/tool-icons/brush-mode-none.png';
+ import iconBrushModeInside from 'resources/tool-icons/brush-mode-inside.png';
+ import iconBrushModeOutside from 'resources/tool-icons/brush-mode-outside.png';
++import iconBrushTextureNone from 'resources/tool-icons/brush-texture-none.png';
++import iconBrushTextureCrayon from 'resources/tool-icons/brush-texture-crayon.png';
++import iconBrushTextureChalk from 'resources/tool-icons/brush-texture-chalk.png';
++import iconBrushTextureCharcoal from 'resources/tool-icons/brush-texture-charcoal.png';
++import iconBrushTextureSpray from 'resources/tool-icons/brush-texture-spray.png';
+ 
+ // Actions
+ import iconAction from 'resources/tool-icons/action.svg';
+@@ -291,6 +296,11 @@ const icons = {
+   "brushmodenone": iconBrushModeNone,
+   "brushmodeinside": iconBrushModeInside,
+   "brushmodeoutside": iconBrushModeOutside,
++  "brushtexturenone": iconBrushTextureNone,
++  "brushtexturecrayon": iconBrushTextureCrayon,
++  "brushtexturechalk": iconBrushTextureChalk,
++  "brushtexturecharcoal": iconBrushTextureCharcoal,
++  "brushtexturespray": iconBrushTextureSpray,
+   "outliner": iconOutliner,
+   "play": iconPlay,
+   "pause": iconPause,
 diff --git a/src/Editor/Util/WickInput/WickButton/WickButton.jsx b/src/Editor/Util/WickInput/WickButton/WickButton.jsx
 index 6c1b02e..f440557 100644
 --- a/src/Editor/Util/WickInput/WickButton/WickButton.jsx
@@ -291,3 +1013,746 @@ index 836a3cd..79943e5 100644
          input.click();
        }
  
+diff --git a/src/resources/tool-icons/brush-texture-chalk.png b/src/resources/tool-icons/brush-texture-chalk.png
+new file mode 100644
+index 0000000000000000000000000000000000000000..37b2cd1cb0a376cb7e651c9ca56427b3512b26f1
+GIT binary patch
+literal 7703
+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
+bIWW+g>Xy{z5OWv+0KoRV!@1(K=*RyHjqe>Q
+
+literal 0
+HcmV?d00001
+
+diff --git a/src/resources/tool-icons/brush-texture-charcoal.png b/src/resources/tool-icons/brush-texture-charcoal.png
+new file mode 100644
+index 0000000000000000000000000000000000000000..3fda822bd14dd43cbbe3cd2de1c8a6f913d6d9ea
+GIT binary patch
+literal 5795
+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
+SZZ81<04z_~9WOH>Q2qmhV^n(p
+
+literal 0
+HcmV?d00001
+
+diff --git a/src/resources/tool-icons/brush-texture-crayon.png b/src/resources/tool-icons/brush-texture-crayon.png
+new file mode 100644
+index 0000000000000000000000000000000000000000..c5df031792e498f124c64eb2152feb0f6a79867a
+GIT binary patch
+literal 5726
+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
+DcWG(?
+
+literal 0
+HcmV?d00001
+
+diff --git a/src/resources/tool-icons/brush-texture-none.png b/src/resources/tool-icons/brush-texture-none.png
+new file mode 100644
+index 0000000000000000000000000000000000000000..14310d6b325979749e7eabce18ab0a60e43fb3d9
+GIT binary patch
+literal 4806
+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
+G$NmSfT|;jG
+
+literal 0
+HcmV?d00001
+
+diff --git a/src/resources/tool-icons/brush-texture-spray.png b/src/resources/tool-icons/brush-texture-spray.png
+new file mode 100644
+index 0000000000000000000000000000000000000000..f07095e0c281dd0daaf37782514c758ceca2552e
+GIT binary patch
+literal 12741
+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
+
+literal 0
+HcmV?d00001
+

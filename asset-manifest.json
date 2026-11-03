@@ -1,8 +1,8 @@
 {
-  "main.css": "./static/css/main.31b41baf.chunk.css",
-  "main.js": "./static/js/main.ccfa2a4d.chunk.js",
-  "static/css/1.a46083a0.chunk.css": "./static/css/1.a46083a0.chunk.css",
-  "static/js/1.0e5b1ad8.chunk.js": "./static/js/1.0e5b1ad8.chunk.js",
+  "main.css": "./static/css/main.be52ccbc.chunk.css",
+  "main.js": "./static/js/main.f48fd648.chunk.js",
+  "static/css/1.d92c0639.chunk.css": "./static/css/1.d92c0639.chunk.css",
+  "static/js/1.f0492394.chunk.js": "./static/js/1.f0492394.chunk.js",
   "runtime~main.js": "./static/js/runtime~main.4a686d48.js",
   "static/media/settings-icon.svg": "./static/media/settings-icon.d6e566ed.svg",
   "static/media/settings-icon-active.svg": "./static/media/settings-icon-active.91499566.svg",
@@ -40,6 +40,7 @@
   "static/media/point.svg": "./static/media/point.db37d53e.svg",
   "static/media/relativebrush.png": "./static/media/relativebrush.5c9dd1b1.png",
   "static/media/brush-mode-outside.png": "./static/media/brush-mode-outside.755e2c13.png",
+  "static/media/brush-texture-spray.png": "./static/media/brush-texture-spray.cb32b722.png",
   "static/media/action.svg": "./static/media/action.fbfdaba0.svg",
   "static/media/duplicate.svg": "./static/media/duplicate.eaa6fc70.svg",
   "static/media/flipHorizontal.svg": "./static/media/flipHorizontal.40ea72f7.svg",
@@ -174,6 +175,6 @@
   "static/media/twitter.svg": "./static/media/twitter.47cbfa33.svg",
   "static/media/white-heart.svg": "./static/media/white-heart.daf330ed.svg",
   "index.html": "./index.html",
-  "precache-manifest.f8b8a55e01e4f192774ea6996e95b702.js": "./precache-manifest.f8b8a55e01e4f192774ea6996e95b702.js",
+  "precache-manifest.4c0783c761d2aea3364da8a0dca3ab89.js": "./precache-manifest.4c0783c761d2aea3364da8a0dca3ab89.js",
   "service-worker.js": "./service-worker.js"
 }

@@ -46854,6 +46854,11 @@ Wick.ToolSettings = class {
       name: 'brushMode',
       default: 'none',
       options: ['none', 'behind', 'inside']
+    }, {
+      type: "choice",
+      name: 'brushTexture',
+      default: 'none',
+      options: ['none', 'crayon', 'chalk', 'charcoal', 'spray']
     }];
   }
   /**
@@ -58851,6 +58856,194 @@ Wick.Tools = {};
  * You should have received a copy of the GNU General Public License
  * along with Wick Engine.  If not, see <https://www.gnu.org/licenses/>.
  */
+/*
+ * Textured brush tips for the Wick brush tool.
+ *
+ * The brush paints a stroke into a raster canvas (Croquis) and then traces it
+ * into a vector shape with potrace. Grain textures (crayon, chalk, charcoal)
+ * are applied as a mask to that raster just before tracing, so the grain
+ * becomes part of the vector shape. Spray paints with randomized dot stamps.
+ *
+ * Everything is generated procedurally from a fixed seed, so the grain looks
+ * the same every time the editor loads.
+ */
+
+Wick.BrushTextures = (function () {
+    var TILE = 256;
+    var NAMES = ['none', 'crayon', 'chalk', 'charcoal', 'spray'];
+    var GRAINS = ['crayon', 'chalk', 'charcoal'];
+
+    var tileCache = {};
+    var tileURLCache = {};
+
+    function rng (seed) {
+        return function () {
+            seed |= 0; seed = seed + 0x6D2B79F5 | 0;
+            var t = Math.imul(seed ^ seed >>> 15, 1 | seed);
+            t = t + Math.imul(t ^ t >>> 7, 61 | t) ^ t;
+            return ((t ^ t >>> 14) >>> 0) / 4294967296;
+        };
+    }
+
+    /* Seamless value noise over a TILE x TILE square. cellX/cellY = cell size in px. */
+    function makeNoise (seed, cellX, cellY) {
+        var rand = rng(seed);
+        var gw = Math.max(1, Math.round(TILE / cellX));
+        var gh = Math.max(1, Math.round(TILE / cellY));
+        var grid = new Float32Array(gw * gh);
+        for (var i = 0; i < grid.length; i++) grid[i] = rand();
+        var sx = gw / TILE, sy = gh / TILE;
+        return function (x, y) {
+            var fx = x * sx, fy = y * sy;
+            var x0 = Math.floor(fx), y0 = Math.floor(fy);
+            var tx = fx - x0, ty = fy - y0;
+            tx = tx * tx * (3 - 2 * tx);
+            ty = ty * ty * (3 - 2 * ty);
+            var x1 = (x0 + 1) % gw, y1 = (y0 + 1) % gh;
+            x0 = x0 % gw; y0 = y0 % gh;
+            var a = grid[y0 * gw + x0], b = grid[y0 * gw + x1];
+            var c = grid[y1 * gw + x0], d = grid[y1 * gw + x1];
+            return (a + (b - a) * tx) + ((c + (d - c) * tx) - (a + (b - a) * tx)) * ty;
+        };
+    }
+
+    /* Returns 0..1 grain value for each texture. Pixels above the threshold are kept. */
+    var RECIPES = {
+        crayon: function () {
+            var fine = makeNoise(11, 3, 3), mid = makeNoise(12, 8, 8), tooth = makeNoise(13, 4, 12);
+            return { threshold: 0.33, value: function (x, y) {
+                return 0.4 * fine(x, y) + 0.35 * mid(x, y) + 0.25 * tooth(x, y);
+            }};
+        },
+        chalk: function () {
+            var fine = makeNoise(21, 2, 2), mid = makeNoise(22, 6, 6), coarse = makeNoise(23, 16, 16);
+            return { threshold: 0.47, value: function (x, y) {
+                return 0.4 * fine(x, y) + 0.35 * mid(x, y) + 0.25 * coarse(x, y);
+            }};
+        },
+        charcoal: function () {
+            var streak = makeNoise(31, 32, 3), blotch = makeNoise(32, 16, 10), fine = makeNoise(33, 3, 3);
+            return { threshold: 0.40, value: function (x, y) {
+                return 0.4 * streak(x, y) + 0.3 * blotch(x, y) + 0.3 * fine(x, y);
+            }};
+        },
+    };
+
+    /* A TILE x TILE canvas, opaque where paint stays, transparent where grain shows through. */
+    function getTile (name) {
+        if (tileCache[name]) return tileCache[name];
+        var recipe = RECIPES[name]();
+        var canvas = document.createElement('canvas');
+        canvas.width = TILE;
+        canvas.height = TILE;
+        var ctx = canvas.getContext('2d');
+        var img = ctx.createImageData(TILE, TILE);
+        for (var y = 0; y < TILE; y++) {
+            for (var x = 0; x < TILE; x++) {
+                var i = (y * TILE + x) * 4;
+                img.data[i] = img.data[i + 1] = img.data[i + 2] = 255;
+                img.data[i + 3] = recipe.value(x, y) > recipe.threshold ? 255 : 0;
+            }
+        }
+        ctx.putImageData(img, 0, 0);
+        tileCache[name] = canvas;
+        return canvas;
+    }
+
+    function getTileURL (name) {
+        if (!tileURLCache[name]) tileURLCache[name] = getTile(name).toDataURL('image/png');
+        return tileURLCache[name];
+    }
+
+    function isGrain (name) {
+        return GRAINS.indexOf(name) !== -1;
+    }
+
+    /*
+     * Erase the grain out of a canvas holding a painted stroke.
+     * offsetX/offsetY: where this canvas's (0,0) sits in the anchored grain space,
+     * so the grain stays put on the drawing instead of following each stroke.
+     */
+    function applyGrain (canvas, name, offsetX, offsetY) {
+        if (!isGrain(name)) return;
+        var ctx = canvas.getContext('2d');
+        var pattern = ctx.createPattern(getTile(name), 'repeat');
+        var ox = ((Math.round(offsetX) % TILE) + TILE) % TILE;
+        var oy = ((Math.round(offsetY) % TILE) + TILE) % TILE;
+        ctx.save();
+        ctx.globalCompositeOperation = 'destination-in';
+        ctx.translate(-ox, -oy);
+        ctx.fillStyle = pattern;
+        ctx.fillRect(ox, oy, canvas.width, canvas.height);
+        ctx.restore();
+    }
+
+    /* Show the grain on the live (pre-trace) stroke using a CSS mask. */
+    function setPreviewMask (element, name, offsetX, offsetY, ratio) {
+        var style = element.style;
+        if (!isGrain(name)) {
+            style.webkitMaskImage = style.maskImage = '';
+            return;
+        }
+        ratio = ratio || 1;
+        var url = 'url(' + getTileURL(name) + ')';
+        var ox = ((Math.round(offsetX) % TILE) + TILE) % TILE;
+        var oy = ((Math.round(offsetY) % TILE) + TILE) % TILE;
+        style.webkitMaskImage = style.maskImage = url;
+        style.webkitMaskSize = style.maskSize = (TILE * ratio) + 'px ' + (TILE * ratio) + 'px';
+        style.webkitMaskRepeat = style.maskRepeat = 'repeat';
+        style.webkitMaskPosition = style.maskPosition = (-ox * ratio) + 'px ' + (-oy * ratio) + 'px';
+    }
+
+    var sprayRand = rng(4242);
+
+    /* A stamp of random dots, denser toward the middle, at the brush's pixel size. */
+    function makeSprayStamp (size) {
+        size = Math.max(4, Math.round(size));
+        var canvas = document.createElement('canvas');
+        canvas.width = canvas.height = size;
+        var ctx = canvas.getContext('2d');
+        ctx.fillStyle = '#fff';
+        var r = size / 2;
+        var dotR = Math.max(1.3, size * 0.022);
+        var count = Math.max(6, Math.round(size * 0.9));
+        for (var i = 0; i < count; i++) {
+            var a = sprayRand() * Math.PI * 2;
+            var d = Math.pow(sprayRand(), 0.75) * (r - dotR);
+            var dr = dotR * (0.7 + sprayRand() * 0.8);
+            ctx.beginPath();
+            ctx.arc(r + Math.cos(a) * d, r + Math.sin(a) * d, dr, 0, Math.PI * 2);
+            ctx.fill();
+        }
+        return canvas;
+    }
+
+    /* A few different stamps so a stroke doesn't show a repeating pattern. */
+    function makeSprayStamps (size) {
+        var stamps = [];
+        for (var i = 0; i < 6; i++) stamps.push(makeSprayStamp(size));
+        return stamps;
+    }
+
+    /* Tracing options: drop specks too small to see and simplify grainy outlines. */
+    function potraceOptions (name) {
+        if (name === 'spray') return { turdSize: 2, optTolerance: 0.4 };
+        if (isGrain(name)) return { turdSize: 4, optTolerance: 0.45 };
+        return {};
+    }
+
+    return {
+        TILE: TILE,
+        NAMES: NAMES,
+        isGrain: isGrain,
+        getTile: getTile,
+        applyGrain: applyGrain,
+        setPreviewMask: setPreviewMask,
+        makeSprayStamps: makeSprayStamps,
+        potraceOptions: potraceOptions,
+    };
+})();
+
 Wick.Tools.Brush = class extends Wick.Tool {
   static get CROQUIS_WAIT_AMT_MS() {
     return 100;
@@ -58949,7 +59142,8 @@ Wick.Tools.Brush = class extends Wick.Tool {
     this.croquisBrush.setSpacing(this.BRUSH_POINT_SPACING);
     this.croquis.setToolStabilizeLevel(this.BRUSH_STABILIZER_LEVEL);
     this.croquis.setToolStabilizeWeight(this.getSetting('brushStabilizerWeight') / 100.0 + 0.3);
-    this.croquis.setToolStabilizeInterval(1); // Forward mouse event to croquis canvas
+    this.croquis.setToolStabilizeInterval(1);
+    this._setupBrushTexture(); // Forward mouse event to croquis canvas
 
     var point = this._croquisToPaperPoint(e.point);
 
@@ -58974,6 +59168,8 @@ Wick.Tools.Brush = class extends Wick.Tool {
 
     try {
       this._updateLastMouseState(point, this.pressure);
+
+      this._nextSprayStamp();
 
       this.croquis.move(point.x, point.y, this.pressure);
     } catch (e) {
@@ -59182,9 +59378,14 @@ Wick.Tools.Brush = class extends Wick.Tool {
       croppedCanvas.height = strokeBounds.height;
       if (strokeBounds.x < 0) strokeBounds.x = 0;
       if (strokeBounds.y < 0) strokeBounds.y = 0;
-      croppedCanvasCtx.drawImage(canvas, strokeBounds.x, strokeBounds.y, strokeBounds.width, strokeBounds.height, 0, 0, croppedCanvas.width, croppedCanvas.height); // Run potrace and add the resulting path to the project
+      croppedCanvasCtx.drawImage(canvas, strokeBounds.x, strokeBounds.y, strokeBounds.width, strokeBounds.height, 0, 0, croppedCanvas.width, croppedCanvas.height);
+      // Bake the brush texture grain into the stroke before tracing it
+      var grainOffset = this._grainOffset();
+      Wick.BrushTextures.applyGrain(croppedCanvas, this._strokeTexture,
+          strokeBounds.x + grainOffset.x, strokeBounds.y + grainOffset.y);
+ // Run potrace and add the resulting path to the project
 
-      var svg = potrace.fromImage(croppedCanvas).toSVG(1 / this.POTRACE_RESOLUTION / this.paper.view.zoom);
+      var svg = potrace.fromImage(croppedCanvas, Wick.BrushTextures.potraceOptions(this._strokeTexture)).toSVG(1 / this.POTRACE_RESOLUTION / this.paper.view.zoom);
       var potracePath = this.paper.project.importSVG(svg);
       potracePath.fillColor = this.getSetting('fillColor').rgba;
       potracePath.position.x += this.paper.view.bounds.x;
@@ -59265,6 +59466,50 @@ Wick.Tools.Brush = class extends Wick.Tool {
     return result;
   }
 
+  /* Set up the textured brush tip (if any) for the stroke that's starting. */
+  _setupBrushTexture () {
+    var texture = this.getSetting('brushTexture') || 'none';
+    if (Wick.BrushTextures.NAMES.indexOf(texture) === -1) texture = 'none';
+    this._strokeTexture = texture;
+
+    if (texture === 'spray') {
+      this._sprayStamps = Wick.BrushTextures.makeSprayStamps(this._getRealBrushSize());
+      this._sprayIndex = 0;
+      this.croquisBrush.setImage(this._sprayStamps[0]);
+      this.croquisBrush.setSpacing(0.3);
+      this.croquisBrush.setNormalSpread(0.25);
+      this.croquisBrush.setTangentSpread(0.25);
+    } else {
+      this._sprayStamps = null;
+      this.croquisBrush.setImage(null);
+      this.croquisBrush.setNormalSpread(0);
+      this.croquisBrush.setTangentSpread(0);
+    }
+
+    // Show the grain on the stroke while it's being drawn
+    var ratio = 1;
+    if (this.croquisDOMElement.clientWidth && this.croquis.getCanvasWidth()) {
+      ratio = this.croquisDOMElement.clientWidth / this.croquis.getCanvasWidth();
+    }
+    var offset = this._grainOffset();
+    Wick.BrushTextures.setPreviewMask(this.croquisDOMElement, texture, offset.x, offset.y, ratio);
+  }
+
+  /* Swap between spray stamps so a stroke doesn't show a repeating dot pattern. */
+  _nextSprayStamp () {
+    if (!this._sprayStamps) return;
+    this._sprayIndex = (this._sprayIndex + 1) % this._sprayStamps.length;
+    this.croquisBrush.setImage(this._sprayStamps[this._sprayIndex]);
+  }
+
+  /* Where the croquis canvas origin sits in grain space, so grain stays fixed to the drawing. */
+  _grainOffset () {
+    var zoom = this.paper.view.zoom;
+    return {
+      x: this.paper.view.bounds.x * zoom,
+      y: this.paper.view.bounds.y * zoom,
+    };
+  }
 };
 /*
  * Copyright 2020 WICKLETS LLC

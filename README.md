@@ -9,7 +9,7 @@ A copy of the open-source [Wick Editor](https://github.com/Wicklets/wick-editor)
 - **Buttons respond to a full tap.** The original fired actions on touch-down, and iPad Safari won't open a file picker from that, so Open and asset upload did nothing.
 - **File pickers work on iPad.** The hidden file input is now actually on the page, and the file-type filter is skipped on iOS so `.wick` projects aren't greyed out.
 - **Sound import is more reliable.** Fixed a file-extension check in the engine and added `.m4a`/`.aac` (iPad Voice Memos).
-- **Textured brushes.** A Brush Texture button in the brush settings adds Crayon, Chalk, Charcoal and Spray. The texture is baked into the traced vector shape, so strokes stay editable and fillable.
+- **Textured brushes.** A Brush Texture button in the brush settings adds Crayon, Chalk, Charcoal and Spray. Both the inside and the outline of the stroke are textured, and the texture is baked into the traced vector shape, so strokes stay editable and fillable.
 - **Hosting tweaks.** Built-in library objects are served as `.wickobj.json`, and the video exporter (`ffmpeg.js`) is split into two files.
 
 ## Source

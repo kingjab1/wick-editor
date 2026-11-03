@@ -58929,6 +58929,72 @@ Wick.BrushTextures = (function () {
         },
     };
 
+    /*
+     * Edge roughness for each texture.
+     * amp: how far the noise pushes the outline in and out (in blurred-alpha units).
+     * blur: edge softening radius as a fraction of brush size, before re-thresholding.
+     */
+    var EDGES = {
+        crayon: { amp: 0.75, blur: 0.12, field: function () {
+            var a = makeNoise(41, 3, 3), b = makeNoise(42, 7, 7);
+            return function (x, y) { return 0.55 * a(x, y) + 0.45 * b(x, y); };
+        }},
+        chalk: { amp: 1.3, blur: 0.18, field: function () {
+            var a = makeNoise(51, 2, 2), b = makeNoise(52, 5, 5), c = makeNoise(53, 12, 12);
+            return function (x, y) { return 0.4 * a(x, y) + 0.35 * b(x, y) + 0.25 * c(x, y); };
+        }},
+        charcoal: { amp: 1.1, blur: 0.16, field: function () {
+            var a = makeNoise(61, 24, 3), b = makeNoise(62, 3, 3), c = makeNoise(63, 10, 10);
+            return function (x, y) { return 0.45 * a(x, y) + 0.3 * b(x, y) + 0.25 * c(x, y); };
+        }},
+    };
+    var edgeFieldCache = {};
+
+    function getEdgeField (name) {
+        if (edgeFieldCache[name]) return edgeFieldCache[name];
+        var f = EDGES[name].field();
+        var field = new Float32Array(TILE * TILE);
+        var min = Infinity, max = -Infinity;
+        for (var y = 0; y < TILE; y++) {
+            for (var x = 0; x < TILE; x++) {
+                var v = f(x, y);
+                field[y * TILE + x] = v;
+                if (v < min) min = v;
+                if (v > max) max = v;
+            }
+        }
+        // stretch to the full 0..1 range so amp means the same thing for every texture
+        for (var i = 0; i < field.length; i++) field[i] = (field[i] - min) / (max - min);
+        edgeFieldCache[name] = field;
+        return field;
+    }
+
+    /* In-place separable box blur of a Float32 array (w x h), radius r. */
+    function boxBlur (src, w, h, r) {
+        if (r < 1) return src;
+        var tmp = new Float32Array(src.length);
+        var norm = 1 / (2 * r + 1);
+        var x, y, acc, i;
+        for (y = 0; y < h; y++) {
+            var row = y * w;
+            acc = 0;
+            for (x = -r; x <= r; x++) acc += src[row + Math.min(w - 1, Math.max(0, x))];
+            for (x = 0; x < w; x++) {
+                tmp[row + x] = acc * norm;
+                acc += src[row + Math.min(w - 1, x + r + 1)] - src[row + Math.max(0, x - r)];
+            }
+        }
+        for (x = 0; x < w; x++) {
+            acc = 0;
+            for (y = -r; y <= r; y++) acc += tmp[Math.min(h - 1, Math.max(0, y)) * w + x];
+            for (y = 0; y < h; y++) {
+                src[y * w + x] = acc * norm;
+                acc += tmp[Math.min(h - 1, y + r + 1) * w + x] - tmp[Math.max(0, y - r) * w + x];
+            }
+        }
+        return src;
+    }
+
     /* A TILE x TILE canvas, opaque where paint stays, transparent where grain shows through. */
     function getTile (name) {
         if (tileCache[name]) return tileCache[name];
@@ -58960,22 +59026,51 @@ Wick.BrushTextures = (function () {
     }
 
     /*
-     * Erase the grain out of a canvas holding a painted stroke.
+     * Texture a canvas holding a painted stroke: roughen its outline, then
+     * knock the grain out of it. The result is hard-edged (opaque or clear),
+     * ready for potrace.
      * offsetX/offsetY: where this canvas's (0,0) sits in the anchored grain space,
      * so the grain stays put on the drawing instead of following each stroke.
+     * brushSize: the stroke's brush size in canvas pixels (scales the edge roughness).
      */
-    function applyGrain (canvas, name, offsetX, offsetY) {
+    function applyGrain (canvas, name, offsetX, offsetY, brushSize) {
         if (!isGrain(name)) return;
+        var w = canvas.width, h = canvas.height;
+        if (!w || !h) return;
         var ctx = canvas.getContext('2d');
-        var pattern = ctx.createPattern(getTile(name), 'repeat');
+        var img = ctx.getImageData(0, 0, w, h);
+        var data = img.data;
         var ox = ((Math.round(offsetX) % TILE) + TILE) % TILE;
         var oy = ((Math.round(offsetY) % TILE) + TILE) % TILE;
-        ctx.save();
-        ctx.globalCompositeOperation = 'destination-in';
-        ctx.translate(-ox, -oy);
-        ctx.fillStyle = pattern;
-        ctx.fillRect(ox, oy, canvas.width, canvas.height);
-        ctx.restore();
+
+        var edge = EDGES[name];
+        var field = getEdgeField(name);
+        var size = brushSize || 20;
+        var r = Math.max(1, Math.min(14, Math.round(size * edge.blur)));
+
+        // Blurred coverage: 1 deep inside the stroke, falling to 0 just outside it
+        var cov = new Float32Array(w * h);
+        for (var i = 0, j = 3; i < cov.length; i++, j += 4) cov[i] = data[j] / 255;
+        boxBlur(cov, w, h, r);
+        boxBlur(cov, w, h, r);
+
+        var grain = getTile(name).getContext('2d').getImageData(0, 0, TILE, TILE).data;
+
+        for (var y = 0; y < h; y++) {
+            var ty = ((y + oy) % TILE) * TILE;
+            for (var x = 0; x < w; x++) {
+                var p = y * w + x;
+                var c = cov[p];
+                var a = 0;
+                if (c > 0.02) {
+                    var t = ty + ((x + ox) % TILE);
+                    // Noise pushes the outline in and out; grain cuts holes inside
+                    if (c + edge.amp * (field[t] - 0.5) > 0.5 && grain[t * 4 + 3] > 0) a = 255;
+                }
+                data[p * 4 + 3] = a;
+            }
+        }
+        ctx.putImageData(img, 0, 0);
     }
 
     /* Show the grain on the live (pre-trace) stroke using a CSS mask. */
@@ -59351,7 +59446,11 @@ Wick.Tools.Brush = class extends Wick.Tool {
 
   _potraceCroquisCanvas(point) {
     this.errorOccured = false;
-    var strokeBounds = this.strokeBounds.clone(); // Attempting to draw with a transparent fill color. Throw an error.
+    var strokeBounds = this.strokeBounds.clone();
+    // Textured strokes get rough edges that reach past the brush outline, so trace a wider area
+    if (Wick.BrushTextures.isGrain(this._strokeTexture)) {
+        strokeBounds = strokeBounds.expand(this._strokeSize * 1.5);
+    } // Attempting to draw with a transparent fill color. Throw an error.
 
     if (this.getSetting('fillColor').a === 0) {
       this.handleBrushError('transparentColor');
@@ -59382,7 +59481,7 @@ Wick.Tools.Brush = class extends Wick.Tool {
       // Bake the brush texture grain into the stroke before tracing it
       var grainOffset = this._grainOffset();
       Wick.BrushTextures.applyGrain(croppedCanvas, this._strokeTexture,
-          strokeBounds.x + grainOffset.x, strokeBounds.y + grainOffset.y);
+          strokeBounds.x + grainOffset.x, strokeBounds.y + grainOffset.y, this._strokeSize);
  // Run potrace and add the resulting path to the project
 
       var svg = potrace.fromImage(croppedCanvas, Wick.BrushTextures.potraceOptions(this._strokeTexture)).toSVG(1 / this.POTRACE_RESOLUTION / this.paper.view.zoom);
@@ -59471,6 +59570,7 @@ Wick.Tools.Brush = class extends Wick.Tool {
     var texture = this.getSetting('brushTexture') || 'none';
     if (Wick.BrushTextures.NAMES.indexOf(texture) === -1) texture = 'none';
     this._strokeTexture = texture;
+    this._strokeSize = this._getRealBrushSize();
 
     if (texture === 'spray') {
       this._sprayStamps = Wick.BrushTextures.makeSprayStamps(this._getRealBrushSize());

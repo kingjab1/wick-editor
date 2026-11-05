@@ -450,6 +450,20 @@ index 0000000..4dd5733
 +        potraceOptions: potraceOptions,
 +    };
 +})();
+diff --git a/engine/src/view/View.Timeline.js b/engine/src/view/View.Timeline.js
+index 7cb9e16..2978df3 100644
+--- a/engine/src/view/View.Timeline.js
++++ b/engine/src/view/View.Timeline.js
+@@ -30,6 +30,9 @@ Wick.View.Timeline = class extends Wick.View {
+         this.frameLayers = [];
+ 
+         var layersInRenderOrder = this.model.layers.filter(layer => {
++            // Layers named "Notes" or "Annotations" are teaching notes: visible while editing,
++            // never in exported or published animations.
++            if (layer.project.isPublished && /^\s*(notes?|annotations?)\s*$/i.test(layer.name || '')) return false;
+             return layer.project.isPublished || !layer.hidden;
+         }).reverse();
+ 
 diff --git a/package.json b/package.json
 index 46a1e31..2c2aaf0 100644
 --- a/package.json
@@ -532,8 +546,33 @@ index 15dc502..366b047 100644
  
  var now = Date.now;
  
+diff --git a/public/corelibs/wick-engine/emptyproject.html b/public/corelibs/wick-engine/emptyproject.html
+index 00d84a7..0cba1db 100644
+--- a/public/corelibs/wick-engine/emptyproject.html
++++ b/public/corelibs/wick-engine/emptyproject.html
+@@ -34763,8 +34763,8 @@ module.exports = require('./_descriptors') ? function(object, key, value){
+ },{"./_descriptors":42,"./_object-dp":52,"./_property-desc":53}],48:[function(require,module,exports){
+ module.exports = require('./_global').document && document.documentElement;
+ },{"./_global":46}],49:[function(require,module,exports){
+-module.exports = !require('./_descriptors') && !require('./_fails')(function(){
+-  return Object.defineProperty(require('./_dom-create')('div'), 'a', {get: function(){ return 7; }}).a != 7;
++module.exports = !require('./_descriptors') && !require('./_fails')(function(){
++  return Object.defineProperty(require('./_dom-create')('div'), 'a', {get: function(){ return 7; }}).a != 7;
+ });
+ },{"./_descriptors":42,"./_dom-create":43,"./_fails":45}],50:[function(require,module,exports){
+ // fast apply, http://jsperf.lnkit.com/fast-apply/5
+@@ -63752,6 +63752,9 @@ Wick.View.Timeline = class extends Wick.View {
+   render() {
+     this.frameLayers = [];
+     var layersInRenderOrder = this.model.layers.filter(layer => {
++      // Layers named "Notes" or "Annotations" are teaching notes: visible while editing,
++      // never in exported or published animations.
++      if (layer.project.isPublished && /^\s*(notes?|annotations?)\s*$/i.test(layer.name || '')) return false;
+       return layer.project.isPublished || !layer.hidden;
+     }).reverse();
+     layersInRenderOrder.forEach(layer => {
 diff --git a/public/corelibs/wick-engine/wickengine.js b/public/corelibs/wick-engine/wickengine.js
-index 9566efc..cddfe2b 100644
+index 9566efc..fb5fbd7 100644
 --- a/public/corelibs/wick-engine/wickengine.js
 +++ b/public/corelibs/wick-engine/wickengine.js
 @@ -34748,8 +34748,8 @@ module.exports = require('./_descriptors') ? function(object, key, value){
@@ -981,6 +1020,16 @@ index 9566efc..cddfe2b 100644
  };
  /*
   * Copyright 2020 WICKLETS LLC
+@@ -63737,6 +64082,9 @@ Wick.View.Timeline = class extends Wick.View {
+   render() {
+     this.frameLayers = [];
+     var layersInRenderOrder = this.model.layers.filter(layer => {
++      // Layers named "Notes" or "Annotations" are teaching notes: visible while editing,
++      // never in exported or published animations.
++      if (layer.project.isPublished && /^\s*(notes?|annotations?)\s*$/i.test(layer.name || '')) return false;
+       return layer.project.isPublished || !layer.hidden;
+     }).reverse();
+     layersInRenderOrder.forEach(layer => {
 diff --git a/public/index.html b/public/index.html
 index 8a95456..fe60cc2 100644
 --- a/public/index.html
@@ -1005,6 +1054,71 @@ index f4c1ad4..536eaa4 100644
  
      // Wick Project File Input
      this.openProjectFileFromClient = window.createFileInput({
+diff --git a/src/Editor/EditorCore.jsx b/src/Editor/EditorCore.jsx
+index 0383385..46b9947 100644
+--- a/src/Editor/EditorCore.jsx
++++ b/src/Editor/EditorCore.jsx
+@@ -1336,6 +1336,48 @@ class EditorCore extends Component {
+     this.project.prepareProjectForEditor();
+   }
+ 
++  /**
++   * Open a Learn example as a fresh copy, after a reminder to save current work.
++   * Layers named "Notes" or "Annotations" are locked so students don't draw on them by accident.
++   */
++  openLearnExample = (exercise) => {
++    this.openWarningModal({
++      title: 'Open "' + exercise.title + '"?',
++      description: "The example opens as a new project. Save your current project first if you want to keep it.",
++      acceptText: "Open Example",
++      cancelText: "Cancel",
++      acceptAction: () => {
++        this.showWaitOverlay('Opening example...');
++        fetch(process.env.PUBLIC_URL + '/learn/' + exercise.file)
++          .then(resp => {
++            if (!resp.ok) throw new Error('HTTP ' + resp.status);
++            return resp.blob();
++          })
++          .then(blob => {
++            window.Wick.WickFile.fromWickFile(blob, project => {
++              if (!project) {
++                this.hideWaitOverlay();
++                this.toast('Could not open that example.', 'error');
++                return;
++              }
++              project.root.timeline.layers.forEach(layer => {
++                if (/^\s*(notes?|annotations?)\s*$/i.test(layer.name || '')) layer.locked = true;
++              });
++              this.setupNewProject(project);
++              this.toast('Opened "' + exercise.title + '". Save to keep your own copy.', 'success');
++            }, 'blob');
++          })
++          .catch(e => {
++            console.error('openLearnExample:', e);
++            this.hideWaitOverlay();
++            this.toast('Could not download that example. Check your internet connection.', 'error');
++          });
++      },
++      cancelAction: () => {},
++      finalAction: () => {},
++    });
++  }
++
+   openNewProjectConfirmation = () => {
+     this.openWarningModal({
+       description: "You will lose any unsaved changes.",
+diff --git a/src/Editor/EditorWrapper.jsx b/src/Editor/EditorWrapper.jsx
+index d19a6c0..f3f8b00 100644
+--- a/src/Editor/EditorWrapper.jsx
++++ b/src/Editor/EditorWrapper.jsx
+@@ -67,6 +67,7 @@ export default function EditorWrapper(props) {
+                     openModal={props.editor.openModal}
+                     closeActiveModal={props.editor.closeActiveModal}
+                     queueModal={props.editor.queueModal}
++                    openLearnExample={props.editor.openLearnExample}
+                     project={props.editor.project}
+                     createClipFromSelection={props.editor.createClipFromSelection}
+                     createButtonFromSelection={props.editor.createButtonFromSelection}
 diff --git a/src/Editor/Modals/BuiltinLibrary/BuiltinLibrary.jsx b/src/Editor/Modals/BuiltinLibrary/BuiltinLibrary.jsx
 index d30e413..1ef45ff 100644
 --- a/src/Editor/Modals/BuiltinLibrary/BuiltinLibrary.jsx
@@ -1018,6 +1132,515 @@ index d30e413..1ef45ff 100644
  
      fetch (path)
      .then((response) => response.blob())
+diff --git a/src/Editor/Modals/Learn/Learn.jsx b/src/Editor/Modals/Learn/Learn.jsx
+new file mode 100644
+index 0000000..5bf5a65
+--- /dev/null
++++ b/src/Editor/Modals/Learn/Learn.jsx
+@@ -0,0 +1,205 @@
++/*
++ * Learn: example exercises and animation principles.
++ *
++ * Content is fetched at runtime from /learn/catalog.json, which is generated
++ * from the files in /learn/examples (see learn/README.md in the site repo).
++ * Adding an example never requires rebuilding the editor.
++ *
++ * This file is part of a modified version of Wick Editor and is licensed
++ * under the GNU General Public License v3 or later.
++ */
++
++import React, { Component } from 'react';
++import WickModal from 'Editor/Modals/WickModal/WickModal';
++
++import './_learn.scss';
++
++class Learn extends Component {
++  constructor (props) {
++    super(props);
++
++    this.state = {
++      catalog: null,
++      error: false,
++      view: 'exercises',
++      filter: null,
++    };
++  }
++
++  static get ROOT () {
++    return process.env.PUBLIC_URL + '/learn/';
++  }
++
++  componentDidUpdate (prevProps) {
++    if (this.props.open && !prevProps.open) {
++      this.loadCatalog();
++    }
++  }
++
++  loadCatalog = () => {
++    // Always refetch so newly added examples show up without reloading the editor.
++    fetch(Learn.ROOT + 'catalog.json?t=' + Date.now())
++      .then(resp => {
++        if (!resp.ok) throw new Error('HTTP ' + resp.status);
++        return resp.json();
++      })
++      .then(catalog => {
++        this.setState({
++          catalog: {
++            principles: catalog.principles || [],
++            exercises: catalog.exercises || [],
++          },
++          error: false,
++        });
++      })
++      .catch(e => {
++        console.error('Learn: could not load catalog', e);
++        if (!this.state.catalog) this.setState({ error: true });
++      });
++  }
++
++  principleName = (id) => {
++    let p = this.state.catalog.principles.find(p => p.id === id);
++    return p ? p.name : id;
++  }
++
++  exercisesFor = (principleId) => {
++    return this.state.catalog.exercises.filter(ex => (ex.principles || []).indexOf(principleId) !== -1);
++  }
++
++  showPrinciple = (principleId) => {
++    this.setState({ view: 'exercises', filter: principleId });
++  }
++
++  open = (exercise) => {
++    this.props.openLearnExample(exercise);
++  }
++
++  renderChip = (id, key) => {
++    let active = this.state.filter === id;
++    return (
++      <button
++        key={key || id}
++        className={'learn-chip' + (active ? ' learn-chip-active' : '')}
++        onClick={(e) => {
++          e.stopPropagation();
++          this.setState({ view: 'exercises', filter: active ? null : id });
++        }}>
++        {this.principleName(id)}
++      </button>
++    );
++  }
++
++  renderExercise = (exercise) => {
++    return (
++      <div
++        key={exercise.id}
++        className='learn-card'
++        role='button'
++        onClick={() => this.open(exercise)}>
++        <div className='learn-card-preview'>
++          {exercise.preview
++            ? <img alt={exercise.title} loading='lazy' src={Learn.ROOT + exercise.preview} />
++            : <div className='learn-card-placeholder'>{exercise.title.charAt(0)}</div>}
++        </div>
++        <div className='learn-card-title'>{exercise.title}</div>
++        {exercise.description && <div className='learn-card-description'>{exercise.description}</div>}
++        <div className='learn-chips'>
++          {(exercise.principles || []).map(id => this.renderChip(id))}
++          {(exercise.tags || []).map(tag => <span key={'tag-' + tag} className='learn-chip learn-chip-tag'>{tag}</span>)}
++        </div>
++      </div>
++    );
++  }
++
++  renderExercises = () => {
++    let { catalog, filter } = this.state;
++    let list = filter ? this.exercisesFor(filter) : catalog.exercises;
++
++    return (
++      <div className='learn-scroll'>
++        {filter &&
++          <div className='learn-filter-bar'>
++            Showing: <b>{this.principleName(filter)}</b>
++            <button className='learn-link' onClick={() => this.setState({ filter: null })}>Show all</button>
++          </div>}
++
++        {list.length === 0
++          ? <div className='learn-empty'>
++              {filter ? 'No exercises for this principle yet.' : 'Examples are on the way. Check back soon!'}
++            </div>
++          : <div className='learn-grid'>{list.map(this.renderExercise)}</div>}
++      </div>
++    );
++  }
++
++  renderPrinciples = () => {
++    return (
++      <div className='learn-scroll'>
++        {this.state.catalog.principles.map(principle => {
++          let exercises = this.exercisesFor(principle.id);
++          return (
++            <div key={principle.id} className='learn-principle'>
++              <div className='learn-principle-header'>
++                <div className='learn-principle-name'>{principle.name}</div>
++                {exercises.length > 0 &&
++                  <button className='learn-link' onClick={() => this.showPrinciple(principle.id)}>
++                    See {exercises.length === 1 ? '1 exercise' : exercises.length + ' exercises'}
++                  </button>}
++              </div>
++              {principle.description && <div className='learn-principle-description'>{principle.description}</div>}
++              {exercises.length > 0 &&
++                <div className='learn-principle-exercises'>
++                  {exercises.map(ex =>
++                    <button key={ex.id} className='learn-principle-exercise' onClick={() => this.open(ex)}>
++                      {ex.preview && <img alt='' loading='lazy' src={Learn.ROOT + ex.preview} />}
++                      <span>{ex.title}</span>
++                    </button>)}
++                </div>}
++            </div>
++          );
++        })}
++      </div>
++    );
++  }
++
++  renderBody = () => {
++    if (this.state.error) {
++      return <div className='learn-empty'>Couldn't load the examples. Check your internet connection and try again.</div>;
++    }
++    if (!this.state.catalog) {
++      return <div className='learn-empty'>Loading...</div>;
++    }
++    return this.state.view === 'exercises' ? this.renderExercises() : this.renderPrinciples();
++  }
++
++  render () {
++    let tab = (view, label) =>
++      <button
++        className={'learn-tab' + (this.state.view === view ? ' learn-tab-active' : '')}
++        onClick={() => this.setState({ view: view })}>
++        {label}
++      </button>;
++
++    return (
++      <WickModal
++        open={this.props.open}
++        toggle={this.props.toggle}
++        className='modal-body learn-modal-body'
++        overlayClassName='modal-overlay learn-modal-overlay'>
++        <div className='learn'>
++          <div className='learn-header'>
++            <div className='learn-title'>Learn</div>
++            <div className='learn-tabs'>
++              {tab('exercises', 'Exercises')}
++              {tab('principles', 'Principles')}
++            </div>
++          </div>
++          {this.renderBody()}
++        </div>
++      </WickModal>
++    );
++  }
++}
++
++export default Learn;
+diff --git a/src/Editor/Modals/Learn/_learn.scss b/src/Editor/Modals/Learn/_learn.scss
+new file mode 100644
+index 0000000..0b52fe6
+--- /dev/null
++++ b/src/Editor/Modals/Learn/_learn.scss
+@@ -0,0 +1,227 @@
++@import 'Editor/_wickbrand.scss';
++
++.learn-modal-body {
++  width: 860px;
++  height: 600px;
++  max-width: 94vw;
++  max-height: 88vh;
++  padding: 0px;
++}
++
++.learn {
++  width: 100%;
++  height: 100%;
++  padding: 18px 20px 10px 20px;
++  display: flex;
++  flex-direction: column;
++  color: $editor-modal-text-gray;
++  text-align: left;
++}
++
++.learn-header {
++  display: flex;
++  align-items: center;
++  justify-content: space-between;
++  margin-bottom: 12px;
++  padding-right: 36px; // room for the modal close button
++}
++
++.learn-title {
++  font-size: 20px;
++  font-weight: bold;
++  color: $editor-modal-text-white;
++}
++
++.learn-tabs {
++  display: flex;
++  background: $editor-modal-dark;
++  border-radius: 8px;
++  padding: 3px;
++}
++
++.learn-tab {
++  border: none;
++  background: transparent;
++  color: $editor-modal-text-dark;
++  font-size: 15px;
++  font-weight: bold;
++  padding: 7px 16px;
++  border-radius: 6px;
++  cursor: pointer;
++}
++
++.learn-tab-active {
++  background: $editor-green-highlight;
++  color: $editor-primary;
++}
++
++.learn-scroll {
++  flex: 1;
++  overflow-y: auto;
++  -webkit-overflow-scrolling: touch;
++  padding-right: 4px;
++}
++
++.learn-grid {
++  display: grid;
++  grid-template-columns: repeat(auto-fill, minmax(220px, 1fr));
++  grid-gap: 14px;
++  padding-bottom: 10px;
++}
++
++.learn-card {
++  background: $editor-modal-dark;
++  border-radius: 8px;
++  overflow: hidden;
++  cursor: pointer;
++  display: flex;
++  flex-direction: column;
++  border: 2px solid transparent;
++
++  &:hover, &:active {
++    border-color: $editor-green-highlight;
++  }
++}
++
++.learn-card-preview {
++  width: 100%;
++  aspect-ratio: 16 / 9;
++  background: white;
++  display: flex;
++  align-items: center;
++  justify-content: center;
++  overflow: hidden;
++
++  img {
++    width: 100%;
++    height: 100%;
++    object-fit: contain;
++  }
++}
++
++// Older Safari has no aspect-ratio support
++@supports not (aspect-ratio: 16 / 9) {
++  .learn-card-preview { height: 130px; }
++}
++
++.learn-card-placeholder {
++  font-size: 48px;
++  font-weight: bold;
++  color: $editor-modal-gray-secondary;
++}
++
++.learn-card-title {
++  font-size: 16px;
++  font-weight: bold;
++  color: $editor-modal-text-white;
++  padding: 8px 10px 2px 10px;
++}
++
++.learn-card-description {
++  font-size: 13px;
++  color: $editor-modal-text-dark;
++  padding: 2px 10px;
++}
++
++.learn-chips {
++  display: flex;
++  flex-wrap: wrap;
++  padding: 6px 8px 10px 8px;
++}
++
++.learn-chip {
++  border: 1px solid $editor-modal-gray-secondary;
++  background: transparent;
++  color: $editor-modal-text-gray;
++  font-size: 12px;
++  border-radius: 12px;
++  padding: 3px 9px;
++  margin: 2px;
++  cursor: pointer;
++}
++
++.learn-chip-active {
++  background: $editor-green-highlight;
++  border-color: $editor-green-highlight;
++  color: $editor-primary;
++}
++
++.learn-chip-tag {
++  cursor: default;
++  border-style: dashed;
++}
++
++.learn-filter-bar {
++  margin-bottom: 10px;
++  font-size: 14px;
++}
++
++.learn-link {
++  border: none;
++  background: transparent;
++  color: $editor-green-highlight;
++  font-size: 14px;
++  font-weight: bold;
++  padding: 4px 8px;
++  cursor: pointer;
++}
++
++.learn-empty {
++  padding: 40px 10px;
++  text-align: center;
++  color: $editor-modal-text-dark;
++  font-size: 16px;
++}
++
++.learn-principle {
++  background: $editor-modal-dark;
++  border-radius: 8px;
++  padding: 10px 12px;
++  margin-bottom: 10px;
++}
++
++.learn-principle-header {
++  display: flex;
++  align-items: center;
++  justify-content: space-between;
++}
++
++.learn-principle-name {
++  font-size: 16px;
++  font-weight: bold;
++  color: $editor-modal-text-white;
++}
++
++.learn-principle-description {
++  font-size: 14px;
++  color: $editor-modal-text-dark;
++  margin-top: 4px;
++}
++
++.learn-principle-exercises {
++  display: flex;
++  flex-wrap: wrap;
++  margin-top: 8px;
++}
++
++.learn-principle-exercise {
++  display: flex;
++  align-items: center;
++  border: 1px solid $editor-modal-gray-secondary;
++  background: $editor-modal-gray;
++  color: $editor-modal-text-gray;
++  border-radius: 6px;
++  padding: 4px 10px 4px 4px;
++  margin: 3px;
++  font-size: 13px;
++  cursor: pointer;
++
++  img {
++    width: 44px;
++    height: 26px;
++    object-fit: contain;
++    background: white;
++    border-radius: 3px;
++    margin-right: 6px;
++  }
++}
+diff --git a/src/Editor/Modals/MobileMenu/MobileMenu.jsx b/src/Editor/Modals/MobileMenu/MobileMenu.jsx
+index 270900a..93ea58c 100644
+--- a/src/Editor/Modals/MobileMenu/MobileMenu.jsx
++++ b/src/Editor/Modals/MobileMenu/MobileMenu.jsx
+@@ -32,7 +32,8 @@ class MobileMenu extends Component {
+       overlayClassName: "modal-overlay mobile-menu-overlay",
+     };
+ 
+-    let items = [{text: "new", icon: "create-white", action: this.props.openNewProjectConfirmation},
++    let items = [{text: "learn", icon: "play", action: () => this.props.openModal('Learn')},
++        {text: "new", icon: "create-white", action: this.props.openNewProjectConfirmation},
+         {text: "open", icon: "load-white", action: this.props.openProjectFileDialog},
+         {text: "export", icon: "export", action: () => this.props.openModal('ExportOptions')},
+         {text: "settings", icon: "gear-white", action: () => this.props.openModal('SettingsModal')},
+diff --git a/src/Editor/Modals/ModalHandler/ModalHandler.jsx b/src/Editor/Modals/ModalHandler/ModalHandler.jsx
+index b3f225d..4c3f43b 100644
+--- a/src/Editor/Modals/ModalHandler/ModalHandler.jsx
++++ b/src/Editor/Modals/ModalHandler/ModalHandler.jsx
+@@ -28,6 +28,7 @@ import GeneralWarning from '../GeneralWarning/GeneralWarning';
+ import ExportMedia from '../ExportMedia/ExportMedia';
+ import SettingsModal from '../SettingsModal/SettingsModal';
+ import BuiltinLibrary from '../BuiltinLibrary/BuiltinLibrary';
++import Learn from '../Learn/Learn';
+ import EditorInfo from '../EditorInfo/EditorInfo';
+ import OpenSourceNotices from '../OpenSourceNotices/OpenSourceNotices';
+ import MobileMenu from '../MobileMenu/MobileMenu';
+@@ -122,6 +123,11 @@ class ModalHandler extends Component {
+           setToolSetting={this.props.setToolSetting}
+           getToolSettingRestrictions={this.props.getToolSettingRestrictions}
+         />
++        <Learn
++          toggle={this.props.closeActiveModal}
++          open={this.props.activeModalName === 'Learn'}
++          openLearnExample={this.props.openLearnExample}
++        />
+         <BuiltinLibrary
+           openModal={this.props.openModal}
+           toggle={this.props.closeActiveModal}
+diff --git a/src/Editor/Panels/MenuBar/MenuBar.jsx b/src/Editor/Panels/MenuBar/MenuBar.jsx
+index 907061f..5775b32 100644
+--- a/src/Editor/Panels/MenuBar/MenuBar.jsx
++++ b/src/Editor/Panels/MenuBar/MenuBar.jsx
+@@ -50,6 +50,11 @@ class MenuBar extends Component {
+ 
+         <div className="menu-bar-actions-container">
+ 
++          <MenuBarButton
++            text="learn"
++            action={() => this.props.openModal('Learn')}
++          />
++
+           <MenuBarButton
+             text="new"
+             action={this.props.openNewProjectConfirmation}
+@@ -98,6 +103,10 @@ class MenuBar extends Component {
+         </div>
+ 
+         <div className="menu-bar-actions-container">
++          <MenuBarButton
++            text="learn"
++            action={() => this.props.openModal('Learn')}
++          />
+           <MenuBarButton
+             text="save"
+             action={this.props.exportProjectAsWickFile}
 diff --git a/src/Editor/Panels/Toolbox/ToolSettings/ToolSettings.jsx b/src/Editor/Panels/Toolbox/ToolSettings/ToolSettings.jsx
 index 96051eb..7585c76 100644
 --- a/src/Editor/Panels/Toolbox/ToolSettings/ToolSettings.jsx

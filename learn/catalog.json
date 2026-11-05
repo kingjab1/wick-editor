@@ -1,0 +1,66 @@
+{
+  "generated": "2026-11-05T15:49:06.694Z",
+  "principles": [
+    {
+      "id": "squash-and-stretch",
+      "name": "Squash and Stretch",
+      "description": ""
+    },
+    {
+      "id": "anticipation",
+      "name": "Anticipation",
+      "description": ""
+    },
+    {
+      "id": "staging",
+      "name": "Staging",
+      "description": ""
+    },
+    {
+      "id": "straight-ahead-and-pose-to-pose",
+      "name": "Straight Ahead and Pose to Pose",
+      "description": ""
+    },
+    {
+      "id": "follow-through-and-overlapping-action",
+      "name": "Follow Through and Overlapping Action",
+      "description": ""
+    },
+    {
+      "id": "slow-in-and-slow-out",
+      "name": "Slow In and Slow Out",
+      "description": ""
+    },
+    {
+      "id": "arcs",
+      "name": "Arcs",
+      "description": ""
+    },
+    {
+      "id": "secondary-action",
+      "name": "Secondary Action",
+      "description": ""
+    },
+    {
+      "id": "timing",
+      "name": "Timing",
+      "description": ""
+    },
+    {
+      "id": "exaggeration",
+      "name": "Exaggeration",
+      "description": ""
+    },
+    {
+      "id": "solid-drawing",
+      "name": "Solid Drawing",
+      "description": ""
+    },
+    {
+      "id": "appeal",
+      "name": "Appeal",
+      "description": ""
+    }
+  ],
+  "exercises": []
+}

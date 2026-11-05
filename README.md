@@ -10,6 +10,7 @@ A copy of the open-source [Wick Editor](https://github.com/Wicklets/wick-editor)
 - **File pickers work on iPad.** The hidden file input is now actually on the page, and the file-type filter is skipped on iOS so `.wick` projects aren't greyed out.
 - **Sound import is more reliable.** Fixed a file-extension check in the engine and added `.m4a`/`.aac` (iPad Voice Memos).
 - **Textured brushes.** A Brush Texture button in the brush settings adds Crayon, Chalk, Charcoal and Spray. Both the inside and the outline of the stroke are textured, and the texture is baked into the traced vector shape, so strokes stay editable and fillable.
+- **Learn tab.** A Learn button opens example exercises (tagged by animation principle) and a Principles view. Content lives in [`learn/`](learn/README.md) and is loaded at runtime, so adding an example never needs a rebuild. Layers named Notes or Annotations show while editing but never in exports.
 - **Hosting tweaks.** Built-in library objects are served as `.wickobj.json`, and the video exporter (`ffmpeg.js`) is split into two files.
 
 ## Source

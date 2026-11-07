@@ -46859,7 +46859,16 @@ Wick.ToolSettings = class {
       name: 'brushTexture',
       default: 'none',
       options: ['none', 'crayon', 'chalk', 'charcoal', 'spray']
-    }];
+    }, {
+            type: "choice",
+            name: 'artLayer',
+            default: 'line',
+            options: ['line', 'color']
+        }, {
+            type: "boolean",
+            name: 'bucketFillsColor',
+            default: true
+        }];
   }
   /**
    * Create a new ToolSettings object.
@@ -53946,7 +53955,10 @@ Wick.Path = class extends Wick.Base {
     var data = super._serialize(args);
 
     data.json = this.json;
-    delete data.json[1].data; // optimization: replace dataurls with asset uuids
+    // Keep only the Line/Color art tag; drop runtime data (uuids, view state)
+    var artLayer = data.json[1].data && data.json[1].data.artLayer;
+    delete data.json[1].data;
+    if (artLayer) data.json[1].data = { artLayer: artLayer }; // optimization: replace dataurls with asset uuids
 
     if (data.json[0] === 'Raster' && data.json[1].source.startsWith('data:')) {
       if (!this.project) {
@@ -58543,6 +58555,145 @@ Wick.Button = class extends Wick.Clip {
  * You should have received a copy of the GNU General Public License
  * along with Wick Engine.  If not, see <https://www.gnu.org/licenses/>.
  */
+/*
+ * Line Art / Color Art for Wick layers (in the spirit of Toon Boom Harmony).
+ *
+ * Every layer stays a single timeline row. Each path drawn into a frame is
+ * tagged as 'line' or 'color' (stored in the paper.js item's data, so it is
+ * saved with the project). Within a frame, color art is always kept below
+ * everything else, so line art sits on top no matter what order things were
+ * drawn in. Either kind can be hidden while editing; hiding never affects
+ * exports or published projects.
+ *
+ * Untagged content (older projects, images, text, clips) is treated like line
+ * art for stacking: it stays above color art.
+ *
+ * This file is part of a modified version of Wick Editor and is licensed
+ * under the GNU General Public License v3 or later.
+ */
+
+Wick.ArtLayers = {
+    LINE: 'line',
+    COLOR: 'color',
+
+    /* View toggles. Not saved with the project or settings, so every session starts with both visible. */
+    showLine: true,
+    showColor: true,
+
+    /* Called after a visibility change so the editor can re-render the canvas. */
+    onVisibilityChange: null,
+
+    /* UI listeners (e.g. the toolbar switch) told whenever visibility changes. */
+    _listeners: [],
+
+    subscribe: function (fn) {
+        Wick.ArtLayers._listeners.push(fn);
+        return function () {
+            Wick.ArtLayers._listeners = Wick.ArtLayers._listeners.filter(function (f) { return f !== fn; });
+        };
+    },
+
+    _notify: function () {
+        Wick.ArtLayers._listeners.forEach(function (fn) { fn(); });
+    },
+
+    typeOf: function (item) {
+        var t = item && item.data && item.data.artLayer;
+        return t === 'color' || t === 'line' ? t : null;
+    },
+
+    isColor: function (item) {
+        return Wick.ArtLayers.typeOf(item) === 'color';
+    },
+
+    setVisible: function (type, visible) {
+        if (type === 'color') Wick.ArtLayers.showColor = !!visible;
+        if (type === 'line') Wick.ArtLayers.showLine = !!visible;
+        Wick.ArtLayers._notify();
+        if (Wick.ArtLayers.onVisibilityChange) Wick.ArtLayers.onVisibilityChange();
+    },
+
+    /* Hide or re-show an item on the editing canvas to match the Line/Color toggles. */
+    applyVisibility: function (item) {
+        var t = Wick.ArtLayers.typeOf(item);
+        if ((t === 'color' && !Wick.ArtLayers.showColor) || (t === 'line' && !Wick.ArtLayers.showLine)) {
+            item.visible = false;
+            item.data.artHidden = true;
+        } else {
+            // Canvas items are reused between renders, so undo an earlier hide
+            Wick.ArtLayers.restoreVisibility(item);
+        }
+    },
+
+    /* Undo applyVisibility before an item is saved, so hiding never gets stored in the project. */
+    restoreVisibility: function (item) {
+        if (item && item.data && item.data.artHidden) {
+            item.visible = true;
+            delete item.data.artHidden;
+        }
+    },
+
+    _content: function (layer, except) {
+        return layer.children.filter(function (child) {
+            return child !== except && !(child.data && child.data.wickType === 'gui');
+        });
+    },
+
+    /*
+     * Tag an item and insert it into a paper layer at the right depth.
+     * position: 'top' or 'bottom' of its own stack (color stack or line stack).
+     */
+    place: function (item, type, layer, position) {
+        type = type === 'color' ? 'color' : 'line';
+        item.data = item.data || {};
+        item.data.artLayer = type;
+
+        // Drawing into a hidden art type turns it back on, so the new stroke doesn't vanish.
+        // (Only the flag changes here; the canvas re-renders with it after the edit is applied.)
+        if (type === 'color' && !Wick.ArtLayers.showColor) { Wick.ArtLayers.showColor = true; Wick.ArtLayers._notify(); }
+        if (type === 'line' && !Wick.ArtLayers.showLine) { Wick.ArtLayers.showLine = true; Wick.ArtLayers._notify(); }
+
+        var content = Wick.ArtLayers._content(layer, item);
+        var colors = content.filter(Wick.ArtLayers.isColor);
+        var others = content.filter(function (c) { return !Wick.ArtLayers.isColor(c); });
+
+        if (type === 'color') {
+            if (position === 'bottom' && content.length) {
+                item.insertBelow(content[0]);
+            } else if (others.length) {
+                // top of the color stack = just under the lowest line art
+                item.insertBelow(others[0]);
+            } else {
+                layer.addChild(item);
+            }
+        } else {
+            if (position === 'bottom') {
+                if (colors.length) {
+                    item.insertAbove(colors[colors.length - 1]);
+                } else if (content.length) {
+                    item.insertBelow(content[0]);
+                } else {
+                    layer.addChild(item);
+                }
+            } else {
+                layer.addChild(item);
+            }
+        }
+    },
+
+    /* Move all color art below everything else in a frame, keeping each group's own order. */
+    normalize: function (layer) {
+        var children = layer.children.slice();
+        var colors = children.filter(Wick.ArtLayers.isColor);
+        if (colors.length === 0) return;
+
+        var others = children.filter(function (c) { return !Wick.ArtLayers.isColor(c); });
+        var ordered = colors.concat(others);
+        var inOrder = ordered.every(function (c, i) { return children[i] === c; });
+        if (!inOrder) layer.addChildren(ordered);
+    },
+};
+
 Wick.Tool = class {
   static get DOUBLE_CLICK_TIME() {
     return 300;
@@ -58788,6 +58939,13 @@ Wick.Tool = class {
     return true;
   }
   /**
+   * Which art layer new strokes go into: 'line' or 'color' (from the Line/Color switch).
+   */
+  get artLayerType() {
+      return this.getSetting('artLayer') === 'color' ? 'color' : 'line';
+  }
+
+  /**
    * Adds a paper.Path to the active frame's paper.Layer.
    * @param {paper.Path} path - the path to add
    * @param {Wick.Frame} frame - (optional) the frame to add the path to.
@@ -58822,7 +58980,8 @@ Wick.Tool = class {
     if (frame && frame !== this.project.activeFrame) {
       /* If the path must be added to a frame other than the active frame,
        * convert the paper.js path into a Wick path and add it to the given frame. */
-      var wickPath = new Wick.Path({
+      path.data.artLayer = this.artLayerType;
+            var wickPath = new Wick.Path({
         json: path.exportJSON({
           asString: false
         })
@@ -58832,7 +58991,7 @@ Wick.Tool = class {
       /* Otherwise, directly add the paper.js path to the paper.js project.
          This is signifigantly faster than creating the Wick path, as this
          method does not require a re-render of the canvas. */
-      this.paper.project.activeLayer.addChild(path);
+      Wick.ArtLayers.place(path, this.artLayerType, this.paper.project.activeLayer, 'top');
     }
   }
 
@@ -60377,13 +60536,14 @@ Wick.Tools.FillBucket = class extends Wick.Tool {
             path.fillColor = this.getSetting('fillColor').rgba;
             path.name = null;
             this.addPathToProject();
-
-            if (e.item) {
-              path.insertAbove(e.item);
-            } else {
-              this.paper.project.activeLayer.addChild(path);
-              this.paper.OrderingUtils.sendToBack([path]);
-            }
+                        // Fills go into Color Art unless the "bucket fills color" setting is off
+                        var artType = this.getSetting('bucketFillsColor') ? 'color' : this.artLayerType;
+                        if (e.item && Wick.ArtLayers.typeOf(e.item) === artType) {
+                            path.data.artLayer = artType;
+                            path.insertAbove(e.item);
+                        } else {
+                            Wick.ArtLayers.place(path, artType, this.paper.project.activeLayer, artType === 'color' ? 'top' : 'bottom');
+                        }
 
             this.fireEvent({
               eventName: 'canvasModified',
@@ -61503,7 +61663,12 @@ Wick.Tools.Zoom = class extends Wick.Tool {
  */
 (function () {
   // Splits a CompoundPath with multiple CW children into individual pieces
-  function splitCompoundPath(compoundPath) {
+  function artOnly(p) {
+        // Keep the Line/Color art tag when the eraser rebuilds a shape
+        return (p && p.data && p.data.artLayer) ? { artLayer: p.data.artLayer } : {};
+    }
+
+    function splitCompoundPath(compoundPath) {
     // Create lists of 'holes' (CCW children) and 'parts' (CW children)
     var holes = [];
     var parts = [];
@@ -61514,7 +61679,7 @@ Wick.Tools.Zoom = class extends Wick.Tool {
         var part = child.clone({
           insert: false
         });
-        part.fillColor = compoundPath.fillColor;
+        part.fillColor = compoundPath.fillColor; part.data = Object.assign({}, compoundPath.data);
         part.insertAbove(compoundPath);
         parts.push(part);
       }
@@ -61540,7 +61705,7 @@ Wick.Tools.Zoom = class extends Wick.Tool {
         }
 
         if (cmp) {
-          cmp.fillColor = compoundPath.fillColor;
+          cmp.fillColor = compoundPath.fillColor; cmp.data = Object.assign({}, compoundPath.data);
           cmp.insertAbove(part);
           part.remove();
         }
@@ -61550,7 +61715,7 @@ Wick.Tools.Zoom = class extends Wick.Tool {
     holes.filter(hole => {
       return resolvedHoles.indexOf(hole) === -1;
     }).forEach(hole => {
-      hole.clockwise = !hole.clockwise;
+      hole.clockwise = !hole.clockwise; hole.data = Object.assign({}, compoundPath.data);
       paper.project.activeLayer.addChild(hole);
     });
     compoundPath.remove();
@@ -61566,12 +61731,12 @@ Wick.Tools.Zoom = class extends Wick.Tool {
 
     if (res.children) {
       res.insertAbove(path);
-      res.data = {};
+      res.data = artOnly(path);
       path.remove();
       splitCompoundPath(res);
     } else {
       if (res.segments.length > 0) {
-        res.data = {};
+        res.data = artOnly(path);
         res.insertAbove(path);
       }
 
@@ -61591,7 +61756,7 @@ Wick.Tools.Zoom = class extends Wick.Tool {
       // Since the path is only strokes, it's trivial to split it into individual paths
       var children = [];
       res.children.forEach(function (child) {
-        child.data = {};
+        child.data = artOnly(path);
         children.push(child);
         child.name = null;
       });
@@ -61601,7 +61766,7 @@ Wick.Tools.Zoom = class extends Wick.Tool {
       res.remove();
     } else {
       res.remove();
-      if (res.segments.length > 0) res.insertAbove(path);
+      { if (res.segments.length > 0) { res.data = artOnly(path); res.insertAbove(path); } }
     }
 
     path.remove();
@@ -61633,7 +61798,7 @@ Wick.Tools.Zoom = class extends Wick.Tool {
       return path instanceof paper.Path || path instanceof paper.CompoundPath;
     });
     var touchingPaths = this.children.filter(function (child) {
-      return eraserPath.bounds.intersects(child.bounds);
+      return child.visible !== false && eraserPath.bounds.intersects(child.bounds);
     });
     touchingPaths.forEach(path => {
       if (path.strokeColor && path.fillColor) {
@@ -64267,11 +64432,18 @@ Wick.View.Frame = class extends Wick.View {
         return object.view.group;
       }
     });
+    // Hide line or color art on the editing canvas when switched off (never when published)
+    if (!(this.model.project && this.model.project.isPublished)) {
+        children.forEach(child => Wick.ArtLayers.applyVisibility(child));
+    }
     this.objectsLayer.addChildren(children);
   }
 
   _applyDrawableChanges() {
-    this.model.drawable.filter(path => {
+    // Keep color art below line art
+        Wick.ArtLayers.normalize(this.objectsLayer);
+
+        this.model.drawable.filter(path => {
       return path instanceof Wick.Path && path.isDynamicText;
     }).forEach(path => {
       path.view.item.bringToFront();
@@ -64446,7 +64618,8 @@ Wick.View.Path = class extends Wick.View {
 
 
   static exportJSON(item) {
-    // Recover original style (if needed - only neccesary if style was overritten by custom onion skin style)
+    Wick.ArtLayers.restoreVisibility(item);
+        // Recover original style (if needed - only neccesary if style was overritten by custom onion skin style)
     if (item.data.originalStyle) {
       item.strokeColor = item.data.originalStyle.strokeColor;
       item.fillColor = item.data.originalStyle.fillColor;

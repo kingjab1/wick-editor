@@ -4,14 +4,13 @@ A copy of the open-source [Wick Editor](https://github.com/Wicklets/wick-editor)
 
 **Open the editor:** https://animate.jabari.art
 
+This is the stable classroom version. New features are built and tested in a separate repo before they come here.
+
 ## What's different from the original
 
 - **Buttons respond to a full tap.** The original fired actions on touch-down, and iPad Safari won't open a file picker from that, so Open and asset upload did nothing.
 - **File pickers work on iPad.** The hidden file input is now actually on the page, and the file-type filter is skipped on iOS so `.wick` projects aren't greyed out.
 - **Sound import is more reliable.** Fixed a file-extension check in the engine and added `.m4a`/`.aac` (iPad Voice Memos).
-- **Textured brushes.** A Brush Texture button in the brush settings adds Crayon, Chalk, Charcoal and Spray. Both the inside and the outline of the stroke are textured, and the texture is baked into the traced vector shape, so strokes stay editable and fillable.
-- **Line Art and Color Art.** Every layer has Line Art and Color Art, like Toon Boom Harmony. A Line/Color switch in the toolbar picks where new strokes go; color always stays under line art in each frame. Each can be hidden while editing (eye icons), which also protects it from the eraser. Hiding never affects exports. The fill bucket paints into Color Art by default ("Fill into Color Art" setting).
-- **Learn tab.** A Learn button opens example exercises (tagged by animation principle) and a Principles view. Content lives in [`learn/`](learn/README.md) and is loaded at runtime, so adding an example never needs a rebuild. Layers named Notes or Annotations show while editing but never in exports.
 - **Hosting tweaks.** Built-in library objects are served as `.wickobj.json`, and the video exporter (`ffmpeg.js`) is split into two files.
 
 ## Source

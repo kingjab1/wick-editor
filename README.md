@@ -2,7 +2,7 @@
 
 A copy of the open-source [Wick Editor](https://github.com/Wicklets/wick-editor) (v1.19.3), patched so it works on iPad, hosted with GitHub Pages.
 
-**Open the editor:** https://kingjab1.github.io/wick-editor/
+**Open the editor:** https://animate.jabari.art
 
 ## What's different from the original
 

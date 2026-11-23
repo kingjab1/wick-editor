@@ -12,8 +12,6 @@ This is the classroom version. New features are built and tested in a separate r
 - **File pickers work on iPad.** The hidden file input is now actually on the page, and the file-type filter is skipped on iOS so `.wick` projects aren't greyed out.
 - **Sound import is more reliable.** Fixed a file-extension check in the engine and added `.m4a`/`.aac` (iPad Voice Memos).
 - **Learn tab.** Example exercises from `learn/examples`, browsable by animation principle. Tapping one opens it as a new copy. Layers named Notes are locked when opened and left out of exports. See `learn/README.md` for how to add examples.
-- **Textured brushes.** Crayon, chalk, charcoal and spray, with rough edges.
-- **Line Art and Color Art in every layer.** The bucket fills Color Art by default (there's a switch to turn that off).
 - **Sound library.** The + button in the Asset Library opens Sounds (Memes, Whooshes & Hits, Everyday, Drums & Music, Robots & Glitch, Interface, Game Blips) and Clips. See `sounds/README.md` for where each set comes from.
 - **My Work and teacher mode** (hidden until `cloud-config.json` is added). Student logins with a picture and PIN, online saves, class rosters and login cards, publishing to Learn, and Class Sounds. See `cloud/README.md`.
 - **Network check.** `nettest.html` checks whether a school network can reach the save service.

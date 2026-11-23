@@ -1,0 +1,17 @@
+{
+  "_help": "The principles shown in the Learn tab, in this order. Add a description to show it under the name. 'aliases' are other words you can use in example file names to tag that principle. You can add your own (for example Loops or Spacing).",
+  "principles": [
+    { "id": "squash-and-stretch", "name": "Squash and Stretch", "description": "", "aliases": ["squash", "stretch"] },
+    { "id": "anticipation", "name": "Anticipation", "description": "", "aliases": [] },
+    { "id": "staging", "name": "Staging", "description": "", "aliases": [] },
+    { "id": "straight-ahead-and-pose-to-pose", "name": "Straight Ahead and Pose to Pose", "description": "", "aliases": ["straight ahead", "pose to pose"] },
+    { "id": "follow-through-and-overlapping-action", "name": "Follow Through and Overlapping Action", "description": "", "aliases": ["follow through", "overlapping action", "overlap", "drag"] },
+    { "id": "slow-in-and-slow-out", "name": "Slow In and Slow Out", "description": "", "aliases": ["slow in", "slow out", "ease", "easing", "ease in", "ease out", "ease in and out"] },
+    { "id": "arcs", "name": "Arcs", "description": "", "aliases": ["arc"] },
+    { "id": "secondary-action", "name": "Secondary Action", "description": "", "aliases": ["secondary"] },
+    { "id": "timing", "name": "Timing", "description": "", "aliases": ["spacing", "timing and spacing"] },
+    { "id": "exaggeration", "name": "Exaggeration", "description": "", "aliases": [] },
+    { "id": "solid-drawing", "name": "Solid Drawing", "description": "", "aliases": [] },
+    { "id": "appeal", "name": "Appeal", "description": "", "aliases": [] }
+  ]
+}

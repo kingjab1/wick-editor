@@ -1,5 +1,6 @@
-# Publishes the site to GitHub Pages on every push to main.
-name: Deploy site
+# Rebuilds the Learn tab catalog from learn/examples and publishes the site.
+# Runs on every push to main, so uploading an example through GitHub is all it takes.
+name: Build Learn catalog and deploy
 
 on:
   push:
@@ -23,6 +24,11 @@ jobs:
       url: ${{ steps.deployment.outputs.page_url }}
     steps:
       - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 20
+      - name: Build Learn catalog
+        run: node learn/build-catalog.js
       - uses: actions/configure-pages@v5
       - uses: actions/upload-pages-artifact@v3
         with:

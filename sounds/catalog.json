@@ -1,0 +1,1485 @@
+{
+ "categories": [
+  "Memes",
+  "Whooshes & Hits",
+  "Everyday",
+  "Drums & Music",
+  "Robots & Glitch",
+  "Interface",
+  "Game Blips"
+ ],
+ "sounds": [
+  {
+   "category": "Memes",
+   "name": "2000 Years Later",
+   "file": "memes/2000-years-later.mp3",
+   "seconds": 3.6,
+   "credit": "Meme sound",
+   "license": "Added by the teacher"
+  },
+  {
+   "category": "Memes",
+   "name": "67",
+   "file": "memes/67.mp3",
+   "seconds": 1.0,
+   "credit": "Meme sound",
+   "license": "Added by the teacher"
+  },
+  {
+   "category": "Memes",
+   "name": "Ack",
+   "file": "memes/ack.mp3",
+   "seconds": 5.0,
+   "credit": "Meme sound",
+   "license": "Added by the teacher"
+  },
+  {
+   "category": "Memes",
+   "name": "Applause",
+   "file": "memes/applause.mp3",
+   "seconds": 7.1,
+   "credit": "Meme sound",
+   "license": "Added by the teacher"
+  },
+  {
+   "category": "Memes",
+   "name": "Are You Out of Your Mind",
+   "file": "memes/are-you-out-of-your-mind.mp3",
+   "seconds": 3.0,
+   "credit": "Meme sound",
+   "license": "Added by the teacher"
+  },
+  {
+   "category": "Memes",
+   "name": "Aura",
+   "file": "memes/aura.mp3",
+   "seconds": 12.9,
+   "credit": "Meme sound",
+   "license": "Added by the teacher"
+  },
+  {
+   "category": "Memes",
+   "name": "Baby Boo",
+   "file": "memes/baby-boo.mp3",
+   "seconds": 2.4,
+   "credit": "Meme sound",
+   "license": "Added by the teacher"
+  },
+  {
+   "category": "Memes",
+   "name": "Baby Laugh",
+   "file": "memes/baby-laugh.mp3",
+   "seconds": 6.6,
+   "credit": "Meme sound",
+   "license": "Added by the teacher"
+  },
+  {
+   "category": "Memes",
+   "name": "Bo Womp",
+   "file": "memes/bo-womp.mp3",
+   "seconds": 1.0,
+   "credit": "Meme sound",
+   "license": "Added by the teacher"
+  },
+  {
+   "category": "Memes",
+   "name": "Bombastic Side Eye",
+   "file": "memes/bombastic-side-eye.mp3",
+   "seconds": 6.4,
+   "credit": "Meme sound",
+   "license": "Added by the teacher"
+  },
+  {
+   "category": "Memes",
+   "name": "Bone Crack",
+   "file": "memes/bone-crack.mp3",
+   "seconds": 1.1,
+   "credit": "Meme sound",
+   "license": "Added by the teacher"
+  },
+  {
+   "category": "Memes",
+   "name": "Bruh",
+   "file": "memes/bruh.mp3",
+   "seconds": 0.9,
+   "credit": "Meme sound",
+   "license": "Added by the teacher"
+  },
+  {
+   "category": "Memes",
+   "name": "Buzzer",
+   "file": "memes/buzzer.mp3",
+   "seconds": 1.2,
+   "credit": "Meme sound",
+   "license": "Added by the teacher"
+  },
+  {
+   "category": "Memes",
+   "name": "Cat Laugh",
+   "file": "memes/cat-laugh.mp3",
+   "seconds": 3.6,
+   "credit": "Meme sound",
+   "license": "Added by the teacher"
+  },
+  {
+   "category": "Memes",
+   "name": "Crickets",
+   "file": "memes/crickets.mp3",
+   "seconds": 5.4,
+   "credit": "Meme sound",
+   "license": "Added by the teacher"
+  },
+  {
+   "category": "Memes",
+   "name": "Crowd Gasp",
+   "file": "memes/crowd-gasp.mp3",
+   "seconds": 1.1,
+   "credit": "Meme sound",
+   "license": "Added by the teacher"
+  },
+  {
+   "category": "Memes",
+   "name": "Dexter",
+   "file": "memes/dexter.mp3",
+   "seconds": 10.7,
+   "credit": "Meme sound",
+   "license": "Added by the teacher"
+  },
+  {
+   "category": "Memes",
+   "name": "Didn't Have To",
+   "file": "memes/didn-t-have-to.mp3",
+   "seconds": 19.0,
+   "credit": "Meme sound",
+   "license": "Added by the teacher"
+  },
+  {
+   "category": "Memes",
+   "name": "Discord Notification",
+   "file": "memes/discord-notification.mp3",
+   "seconds": 0.5,
+   "credit": "Meme sound",
+   "license": "Added by the teacher"
+  },
+  {
+   "category": "Memes",
+   "name": "Elevator Music",
+   "file": "memes/elevator-music.mp3",
+   "seconds": 10.7,
+   "credit": "Meme sound",
+   "license": "Added by the teacher"
+  },
+  {
+   "category": "Memes",
+   "name": "Error",
+   "file": "memes/error.mp3",
+   "seconds": 1.0,
+   "credit": "Meme sound",
+   "license": "Added by the teacher"
+  },
+  {
+   "category": "Memes",
+   "name": "Get Out",
+   "file": "memes/get-out.mp3",
+   "seconds": 1.0,
+   "credit": "Meme sound",
+   "license": "Added by the teacher"
+  },
+  {
+   "category": "Memes",
+   "name": "Goku Drip",
+   "file": "memes/goku-drip.mp3",
+   "seconds": 4.9,
+   "credit": "Meme sound",
+   "license": "Added by the teacher"
+  },
+  {
+   "category": "Memes",
+   "name": "Happy Happy Happy",
+   "file": "memes/happy-happy-happy.mp3",
+   "seconds": 7.5,
+   "credit": "Meme sound",
+   "license": "Added by the teacher"
+  },
+  {
+   "category": "Memes",
+   "name": "Helicopter Helicopter",
+   "file": "memes/helicopter-helicopter.mp3",
+   "seconds": 10.1,
+   "credit": "Meme sound",
+   "license": "Added by the teacher"
+  },
+  {
+   "category": "Memes",
+   "name": "Huh?",
+   "file": "memes/huh.mp3",
+   "seconds": 0.3,
+   "credit": "Meme sound",
+   "license": "Added by the teacher"
+  },
+  {
+   "category": "Memes",
+   "name": "iPhone Notification",
+   "file": "memes/iphone-notification.mp3",
+   "seconds": 4.7,
+   "credit": "Meme sound",
+   "license": "Added by the teacher"
+  },
+  {
+   "category": "Memes",
+   "name": "JJK Battle",
+   "file": "memes/jjk-battle.mp3",
+   "seconds": 18.1,
+   "credit": "Meme sound",
+   "license": "Added by the teacher"
+  },
+  {
+   "category": "Memes",
+   "name": "Lightsaber On",
+   "file": "memes/lightsaber-on.mp3",
+   "seconds": 2.8,
+   "credit": "Meme sound",
+   "license": "Added by the teacher"
+  },
+  {
+   "category": "Memes",
+   "name": "Lizard",
+   "file": "memes/lizard.mp3",
+   "seconds": 1.0,
+   "credit": "Meme sound",
+   "license": "Added by the teacher"
+  },
+  {
+   "category": "Memes",
+   "name": "Lizard Repeat",
+   "file": "memes/lizard-repeat.mp3",
+   "seconds": 10.3,
+   "credit": "Meme sound",
+   "license": "Added by the teacher"
+  },
+  {
+   "category": "Memes",
+   "name": "Mario Coin",
+   "file": "memes/mario-coin.mp3",
+   "seconds": 2.0,
+   "credit": "Meme sound",
+   "license": "Added by the teacher"
+  },
+  {
+   "category": "Memes",
+   "name": "Minecraft Eating",
+   "file": "memes/minecraft-eating.mp3",
+   "seconds": 1.7,
+   "credit": "Meme sound",
+   "license": "Added by the teacher"
+  },
+  {
+   "category": "Memes",
+   "name": "Minecraft Hurt",
+   "file": "memes/minecraft-hurt.mp3",
+   "seconds": 0.4,
+   "credit": "Meme sound",
+   "license": "Added by the teacher"
+  },
+  {
+   "category": "Memes",
+   "name": "Mouse Click",
+   "file": "memes/mouse-click.mp3",
+   "seconds": 1.5,
+   "credit": "Meme sound",
+   "license": "Added by the teacher"
+  },
+  {
+   "category": "Memes",
+   "name": "Moving Stone",
+   "file": "memes/moving-stone.mp3",
+   "seconds": 1.8,
+   "credit": "Meme sound",
+   "license": "Added by the teacher"
+  },
+  {
+   "category": "Memes",
+   "name": "Mr Krabs Walking",
+   "file": "memes/mr-krabs-walking.mp3",
+   "seconds": 2.1,
+   "credit": "Meme sound",
+   "license": "Added by the teacher"
+  },
+  {
+   "category": "Memes",
+   "name": "Oh My God",
+   "file": "memes/oh-my-god.mp3",
+   "seconds": 1.7,
+   "credit": "Meme sound",
+   "license": "Added by the teacher"
+  },
+  {
+   "category": "Memes",
+   "name": "OIIA OIIA",
+   "file": "memes/oiia-oiia.mp3",
+   "seconds": 5.7,
+   "credit": "Meme sound",
+   "license": "Added by the teacher"
+  },
+  {
+   "category": "Memes",
+   "name": "Price Is Wrong",
+   "file": "memes/price-is-wrong.mp3",
+   "seconds": 5.1,
+   "credit": "Meme sound",
+   "license": "Added by the teacher"
+  },
+  {
+   "category": "Memes",
+   "name": "Rizz",
+   "file": "memes/rizz.mp3",
+   "seconds": 1.9,
+   "credit": "Meme sound",
+   "license": "Added by the teacher"
+  },
+  {
+   "category": "Memes",
+   "name": "Rizzbot Laugh",
+   "file": "memes/rizzbot-laugh.mp3",
+   "seconds": 2.4,
+   "credit": "Meme sound",
+   "license": "Added by the teacher"
+  },
+  {
+   "category": "Memes",
+   "name": "Romance",
+   "file": "memes/romance.mp3",
+   "seconds": 5.9,
+   "credit": "Meme sound",
+   "license": "Added by the teacher"
+  },
+  {
+   "category": "Memes",
+   "name": "Run!",
+   "file": "memes/run.mp3",
+   "seconds": 8.3,
+   "credit": "Meme sound",
+   "license": "Added by the teacher"
+  },
+  {
+   "category": "Memes",
+   "name": "Sad Meow Song",
+   "file": "memes/sad-meow-song.mp3",
+   "seconds": 25.1,
+   "credit": "Meme sound",
+   "license": "Added by the teacher"
+  },
+  {
+   "category": "Memes",
+   "name": "Screaming Tree Chicken",
+   "file": "memes/screaming-tree-chicken.mp3",
+   "seconds": 5.7,
+   "credit": "Meme sound",
+   "license": "Added by the teacher"
+  },
+  {
+   "category": "Memes",
+   "name": "Snore (Mimimimi)",
+   "file": "memes/snore-mimimimi.mp3",
+   "seconds": 5.7,
+   "credit": "Meme sound",
+   "license": "Added by the teacher"
+  },
+  {
+   "category": "Memes",
+   "name": "Sponge Stank",
+   "file": "memes/sponge-stank.mp3",
+   "seconds": 2.7,
+   "credit": "Meme sound",
+   "license": "Added by the teacher"
+  },
+  {
+   "category": "Memes",
+   "name": "SpongeBob Fail",
+   "file": "memes/spongebob-fail.mp3",
+   "seconds": 3.4,
+   "credit": "Meme sound",
+   "license": "Added by the teacher"
+  },
+  {
+   "category": "Memes",
+   "name": "SpongeBob Walking",
+   "file": "memes/spongebob-walking.mp3",
+   "seconds": 5.7,
+   "credit": "Meme sound",
+   "license": "Added by the teacher"
+  },
+  {
+   "category": "Memes",
+   "name": "Squidward Walking",
+   "file": "memes/squidward-walking.mp3",
+   "seconds": 3.5,
+   "credit": "Meme sound",
+   "license": "Added by the teacher"
+  },
+  {
+   "category": "Memes",
+   "name": "Super Mario Lose",
+   "file": "memes/super-mario-lose.mp3",
+   "seconds": 9.9,
+   "credit": "Meme sound",
+   "license": "Added by the teacher"
+  },
+  {
+   "category": "Memes",
+   "name": "Taco Bell",
+   "file": "memes/taco-bell.mp3",
+   "seconds": 2.0,
+   "credit": "Meme sound",
+   "license": "Added by the teacher"
+  },
+  {
+   "category": "Memes",
+   "name": "The Undertaker",
+   "file": "memes/the-undertaker.mp3",
+   "seconds": 4.2,
+   "credit": "Meme sound",
+   "license": "Added by the teacher"
+  },
+  {
+   "category": "Memes",
+   "name": "Vine Boom",
+   "file": "memes/vine-boom.mp3",
+   "seconds": 1.3,
+   "credit": "Meme sound",
+   "license": "Added by the teacher"
+  },
+  {
+   "category": "Memes",
+   "name": "Vine Boom (Bass)",
+   "file": "memes/vine-boom-bass.mp3",
+   "seconds": 3.5,
+   "credit": "Meme sound",
+   "license": "Added by the teacher"
+  },
+  {
+   "category": "Memes",
+   "name": "Vine Boom (Longer)",
+   "file": "memes/vine-boom-longer.mp3",
+   "seconds": 3.1,
+   "credit": "Meme sound",
+   "license": "Added by the teacher"
+  },
+  {
+   "category": "Memes",
+   "name": "Weave",
+   "file": "memes/weave.mp3",
+   "seconds": 0.6,
+   "credit": "Meme sound",
+   "license": "Added by the teacher"
+  },
+  {
+   "category": "Memes",
+   "name": "What Bottom Text",
+   "file": "memes/what-bottom-text.mp3",
+   "seconds": 9.0,
+   "credit": "Meme sound",
+   "license": "Added by the teacher"
+  },
+  {
+   "category": "Memes",
+   "name": "Windows XP Shutdown",
+   "file": "memes/windows-xp-shutdown.mp3",
+   "seconds": 3.3,
+   "credit": "Meme sound",
+   "license": "Added by the teacher"
+  },
+  {
+   "category": "Memes",
+   "name": "Wow",
+   "file": "memes/wow.mp3",
+   "seconds": 4.2,
+   "credit": "Meme sound",
+   "license": "Added by the teacher"
+  },
+  {
+   "category": "Memes",
+   "name": "Yaaay",
+   "file": "memes/yaaay.mp3",
+   "seconds": 8.2,
+   "credit": "Meme sound",
+   "license": "Added by the teacher"
+  },
+  {
+   "category": "Memes",
+   "name": "Yoshi Tongue",
+   "file": "memes/yoshi-tongue.mp3",
+   "seconds": 0.2,
+   "credit": "Meme sound",
+   "license": "Added by the teacher"
+  },
+  {
+   "category": "Whooshes & Hits",
+   "name": "Swoosh",
+   "file": "whooshes-hits/swoosh.mp3",
+   "seconds": 0.7,
+   "credit": "Sonic Pi sample library (from Freesound.org)",
+   "license": "CC0"
+  },
+  {
+   "category": "Whooshes & Hits",
+   "name": "Swish",
+   "file": "whooshes-hits/swish.mp3",
+   "seconds": 0.4,
+   "credit": "Sonic Pi sample library (from Freesound.org)",
+   "license": "CC0"
+  },
+  {
+   "category": "Whooshes & Hits",
+   "name": "Soft Swoosh",
+   "file": "whooshes-hits/soft-swoosh.mp3",
+   "seconds": 1.9,
+   "credit": "Sonic Pi sample library (from Freesound.org)",
+   "license": "CC0"
+  },
+  {
+   "category": "Whooshes & Hits",
+   "name": "Dark Whoosh",
+   "file": "whooshes-hits/dark-whoosh.mp3",
+   "seconds": 3.7,
+   "credit": "Sonic Pi sample library (from Freesound.org)",
+   "license": "CC0"
+  },
+  {
+   "category": "Whooshes & Hits",
+   "name": "Impact",
+   "file": "whooshes-hits/impact.mp3",
+   "seconds": 1.1,
+   "credit": "Sonic Pi sample library (from Freesound.org)",
+   "license": "CC0"
+  },
+  {
+   "category": "Whooshes & Hits",
+   "name": "Heavy Impact",
+   "file": "whooshes-hits/heavy-impact.mp3",
+   "seconds": 0.9,
+   "credit": "Sonic Pi sample library (from Freesound.org)",
+   "license": "CC0"
+  },
+  {
+   "category": "Whooshes & Hits",
+   "name": "Movie Boom",
+   "file": "whooshes-hits/movie-boom.mp3",
+   "seconds": 8.0,
+   "credit": "Sonic Pi sample library (from Freesound.org)",
+   "license": "CC0"
+  },
+  {
+   "category": "Whooshes & Hits",
+   "name": "Boom",
+   "file": "whooshes-hits/boom.mp3",
+   "seconds": 1.8,
+   "credit": "Sonic Pi sample library (from Freesound.org)",
+   "license": "CC0"
+  },
+  {
+   "category": "Whooshes & Hits",
+   "name": "Snap",
+   "file": "whooshes-hits/snap.mp3",
+   "seconds": 0.3,
+   "credit": "Sonic Pi sample library (from Freesound.org)",
+   "license": "CC0"
+  },
+  {
+   "category": "Whooshes & Hits",
+   "name": "Finger Snap",
+   "file": "whooshes-hits/finger-snap.mp3",
+   "seconds": 0.2,
+   "credit": "Sonic Pi sample library (from Freesound.org)",
+   "license": "CC0"
+  },
+  {
+   "category": "Whooshes & Hits",
+   "name": "Bass Drop",
+   "file": "whooshes-hits/bass-drop.mp3",
+   "seconds": 2.4,
+   "credit": "Sonic Pi sample library (from Freesound.org)",
+   "license": "CC0"
+  },
+  {
+   "category": "Whooshes & Hits",
+   "name": "Rewind",
+   "file": "whooshes-hits/rewind.mp3",
+   "seconds": 2.7,
+   "credit": "Sonic Pi sample library (from Freesound.org)",
+   "license": "CC0"
+  },
+  {
+   "category": "Whooshes & Hits",
+   "name": "Record Backspin",
+   "file": "whooshes-hits/record-backspin.mp3",
+   "seconds": 1.1,
+   "credit": "Sonic Pi sample library (from Freesound.org)",
+   "license": "CC0"
+  },
+  {
+   "category": "Whooshes & Hits",
+   "name": "Record Scratch",
+   "file": "whooshes-hits/record-scratch.mp3",
+   "seconds": 0.3,
+   "credit": "Sonic Pi sample library (from Freesound.org)",
+   "license": "CC0"
+  },
+  {
+   "category": "Everyday",
+   "name": "Door",
+   "file": "everyday/door.mp3",
+   "seconds": 0.7,
+   "credit": "Adafruit Sound Samples",
+   "license": "CC0"
+  },
+  {
+   "category": "Everyday",
+   "name": "Door Close",
+   "file": "everyday/door-close.mp3",
+   "seconds": 1.2,
+   "credit": "Adafruit Sound Samples",
+   "license": "CC0"
+  },
+  {
+   "category": "Everyday",
+   "name": "Creaky Door",
+   "file": "everyday/creaky-door.mp3",
+   "seconds": 2.5,
+   "credit": "Sonic Pi sample library (from Freesound.org)",
+   "license": "CC0"
+  },
+  {
+   "category": "Everyday",
+   "name": "Drawer Open",
+   "file": "everyday/drawer-open.mp3",
+   "seconds": 1.1,
+   "credit": "Adafruit Sound Samples",
+   "license": "CC0"
+  },
+  {
+   "category": "Everyday",
+   "name": "Drawer Roll",
+   "file": "everyday/drawer-roll.mp3",
+   "seconds": 1.5,
+   "credit": "Adafruit Sound Samples",
+   "license": "CC0"
+  },
+  {
+   "category": "Everyday",
+   "name": "Cardboard Cut",
+   "file": "everyday/cardboard-cut.mp3",
+   "seconds": 1.3,
+   "credit": "Adafruit Sound Samples",
+   "license": "CC0"
+  },
+  {
+   "category": "Everyday",
+   "name": "Bubble Wrap Rustle",
+   "file": "everyday/bubble-wrap-rustle.mp3",
+   "seconds": 0.9,
+   "credit": "Adafruit Sound Samples",
+   "license": "CC0"
+  },
+  {
+   "category": "Everyday",
+   "name": "Printer",
+   "file": "everyday/printer.mp3",
+   "seconds": 1.5,
+   "credit": "Adafruit Sound Samples",
+   "license": "CC0"
+  },
+  {
+   "category": "Everyday",
+   "name": "Box Drop",
+   "file": "everyday/box-drop.mp3",
+   "seconds": 0.5,
+   "credit": "Adafruit Sound Samples",
+   "license": "CC0"
+  },
+  {
+   "category": "Everyday",
+   "name": "Elevator",
+   "file": "everyday/elevator.mp3",
+   "seconds": 2.1,
+   "credit": "Adafruit Sound Samples",
+   "license": "CC0"
+  },
+  {
+   "category": "Everyday",
+   "name": "Subway",
+   "file": "everyday/subway.mp3",
+   "seconds": 1.9,
+   "credit": "Adafruit Sound Samples",
+   "license": "CC0"
+  },
+  {
+   "category": "Everyday",
+   "name": "Radiator Clank",
+   "file": "everyday/radiator-clank.mp3",
+   "seconds": 1.2,
+   "credit": "Adafruit Sound Samples",
+   "license": "CC0"
+  },
+  {
+   "category": "Everyday",
+   "name": "Steam Hiss",
+   "file": "everyday/steam-hiss.mp3",
+   "seconds": 3.1,
+   "credit": "Adafruit Sound Samples",
+   "license": "CC0"
+  },
+  {
+   "category": "Everyday",
+   "name": "Bell",
+   "file": "everyday/bell.mp3",
+   "seconds": 0.8,
+   "credit": "Adafruit Sound Samples",
+   "license": "CC0"
+  },
+  {
+   "category": "Everyday",
+   "name": "Bell Roll",
+   "file": "everyday/bell-roll.mp3",
+   "seconds": 1.7,
+   "credit": "Adafruit Sound Samples",
+   "license": "CC0"
+  },
+  {
+   "category": "Everyday",
+   "name": "Chime",
+   "file": "everyday/chime.mp3",
+   "seconds": 0.7,
+   "credit": "Adafruit Sound Samples",
+   "license": "CC0"
+  },
+  {
+   "category": "Everyday",
+   "name": "Snap",
+   "file": "everyday/snap.mp3",
+   "seconds": 0.2,
+   "credit": "Adafruit Sound Samples",
+   "license": "CC0"
+  },
+  {
+   "category": "Everyday",
+   "name": "Sleigh Bells",
+   "file": "everyday/sleigh-bells.mp3",
+   "seconds": 1.0,
+   "credit": "Adafruit Sound Samples",
+   "license": "CC0"
+  },
+  {
+   "category": "Everyday",
+   "name": "Cash Register",
+   "file": "everyday/cash-register.mp3",
+   "seconds": 2.7,
+   "credit": "Sonic Pi sample library (from Freesound.org)",
+   "license": "CC0"
+  },
+  {
+   "category": "Everyday",
+   "name": "Crow",
+   "file": "everyday/crow.mp3",
+   "seconds": 0.5,
+   "credit": "Sonic Pi sample library (from Freesound.org)",
+   "license": "CC0"
+  },
+  {
+   "category": "Everyday",
+   "name": "Burp",
+   "file": "everyday/burp.mp3",
+   "seconds": 0.8,
+   "credit": "Sonic Pi sample library (from Freesound.org)",
+   "license": "CC0"
+  },
+  {
+   "category": "Everyday",
+   "name": "Phone 1",
+   "file": "everyday/phone-1.mp3",
+   "seconds": 1.3,
+   "credit": "Sonic Pi sample library (from Freesound.org)",
+   "license": "CC0"
+  },
+  {
+   "category": "Everyday",
+   "name": "Phone 2",
+   "file": "everyday/phone-2.mp3",
+   "seconds": 1.3,
+   "credit": "Sonic Pi sample library (from Freesound.org)",
+   "license": "CC0"
+  },
+  {
+   "category": "Drums & Music",
+   "name": "Drum Roll",
+   "file": "drums-music/drum-roll.mp3",
+   "seconds": 6.3,
+   "credit": "Sonic Pi sample library (from Freesound.org)",
+   "license": "CC0"
+  },
+  {
+   "category": "Drums & Music",
+   "name": "Cymbal Crash",
+   "file": "drums-music/cymbal-crash.mp3",
+   "seconds": 1.7,
+   "credit": "Sonic Pi sample library (from Freesound.org)",
+   "license": "CC0"
+  },
+  {
+   "category": "Drums & Music",
+   "name": "Splash Cymbal",
+   "file": "drums-music/splash-cymbal.mp3",
+   "seconds": 2.6,
+   "credit": "Sonic Pi sample library (from Freesound.org)",
+   "license": "CC0"
+  },
+  {
+   "category": "Drums & Music",
+   "name": "Kick Drum",
+   "file": "drums-music/kick-drum.mp3",
+   "seconds": 0.3,
+   "credit": "Sonic Pi sample library (from Freesound.org)",
+   "license": "CC0"
+  },
+  {
+   "category": "Drums & Music",
+   "name": "Snare",
+   "file": "drums-music/snare.mp3",
+   "seconds": 0.5,
+   "credit": "Sonic Pi sample library (from Freesound.org)",
+   "license": "CC0"
+  },
+  {
+   "category": "Drums & Music",
+   "name": "High Tom",
+   "file": "drums-music/high-tom.mp3",
+   "seconds": 0.8,
+   "credit": "Sonic Pi sample library (from Freesound.org)",
+   "license": "CC0"
+  },
+  {
+   "category": "Drums & Music",
+   "name": "Low Tom",
+   "file": "drums-music/low-tom.mp3",
+   "seconds": 1.0,
+   "credit": "Sonic Pi sample library (from Freesound.org)",
+   "license": "CC0"
+  },
+  {
+   "category": "Drums & Music",
+   "name": "Cowbell",
+   "file": "drums-music/cowbell.mp3",
+   "seconds": 0.4,
+   "credit": "Sonic Pi sample library (from Freesound.org)",
+   "license": "CC0"
+  },
+  {
+   "category": "Drums & Music",
+   "name": "Bell Hit",
+   "file": "drums-music/bell-hit.mp3",
+   "seconds": 6.8,
+   "credit": "Sonic Pi sample library (from Freesound.org)",
+   "license": "CC0"
+  },
+  {
+   "category": "Drums & Music",
+   "name": "Guitar Slide",
+   "file": "drums-music/guitar-slide.mp3",
+   "seconds": 4.4,
+   "credit": "Sonic Pi sample library (from Freesound.org)",
+   "license": "CC0"
+  },
+  {
+   "category": "Drums & Music",
+   "name": "Guitar Harmonics",
+   "file": "drums-music/guitar-harmonics.mp3",
+   "seconds": 3.6,
+   "credit": "Sonic Pi sample library (from Freesound.org)",
+   "license": "CC0"
+  },
+  {
+   "category": "Drums & Music",
+   "name": "Choir",
+   "file": "drums-music/choir.mp3",
+   "seconds": 1.6,
+   "credit": "Sonic Pi sample library (from Freesound.org)",
+   "license": "CC0"
+  },
+  {
+   "category": "Drums & Music",
+   "name": "Piano",
+   "file": "drums-music/piano.mp3",
+   "seconds": 2.8,
+   "credit": "Sonic Pi sample library (from Freesound.org)",
+   "license": "CC0"
+  },
+  {
+   "category": "Drums & Music",
+   "name": "Drum Loop",
+   "file": "drums-music/drum-loop.mp3",
+   "seconds": 1.8,
+   "credit": "Sonic Pi sample library (from Freesound.org)",
+   "license": "CC0"
+  },
+  {
+   "category": "Drums & Music",
+   "name": "Safari Loop",
+   "file": "drums-music/safari-loop.mp3",
+   "seconds": 8.0,
+   "credit": "Sonic Pi sample library (from Freesound.org)",
+   "license": "CC0"
+  },
+  {
+   "category": "Drums & Music",
+   "name": "Tabla Loop",
+   "file": "drums-music/tabla-loop.mp3",
+   "seconds": 10.7,
+   "credit": "Sonic Pi sample library (from Freesound.org)",
+   "license": "CC0"
+  },
+  {
+   "category": "Drums & Music",
+   "name": "Tabla Hit",
+   "file": "drums-music/tabla-hit.mp3",
+   "seconds": 0.8,
+   "credit": "Sonic Pi sample library (from Freesound.org)",
+   "license": "CC0"
+  },
+  {
+   "category": "Robots & Glitch",
+   "name": "Robot 1",
+   "file": "robots-glitch/robot-1.mp3",
+   "seconds": 1.0,
+   "credit": "Sonic Pi sample library (from Freesound.org)",
+   "license": "CC0"
+  },
+  {
+   "category": "Robots & Glitch",
+   "name": "Robot 2",
+   "file": "robots-glitch/robot-2.mp3",
+   "seconds": 1.1,
+   "credit": "Sonic Pi sample library (from Freesound.org)",
+   "license": "CC0"
+  },
+  {
+   "category": "Robots & Glitch",
+   "name": "Robot 3",
+   "file": "robots-glitch/robot-3.mp3",
+   "seconds": 1.3,
+   "credit": "Sonic Pi sample library (from Freesound.org)",
+   "license": "CC0"
+  },
+  {
+   "category": "Robots & Glitch",
+   "name": "Robot 4",
+   "file": "robots-glitch/robot-4.mp3",
+   "seconds": 2.0,
+   "credit": "Sonic Pi sample library (from Freesound.org)",
+   "license": "CC0"
+  },
+  {
+   "category": "Robots & Glitch",
+   "name": "Robot 5",
+   "file": "robots-glitch/robot-5.mp3",
+   "seconds": 1.5,
+   "credit": "Sonic Pi sample library (from Freesound.org)",
+   "license": "CC0"
+  },
+  {
+   "category": "Robots & Glitch",
+   "name": "Robot 6",
+   "file": "robots-glitch/robot-6.mp3",
+   "seconds": 2.5,
+   "credit": "Sonic Pi sample library (from Freesound.org)",
+   "license": "CC0"
+  },
+  {
+   "category": "Robots & Glitch",
+   "name": "Robot 7",
+   "file": "robots-glitch/robot-7.mp3",
+   "seconds": 0.5,
+   "credit": "Sonic Pi sample library (from Freesound.org)",
+   "license": "CC0"
+  },
+  {
+   "category": "Robots & Glitch",
+   "name": "Glitch Robot 1",
+   "file": "robots-glitch/glitch-robot-1.mp3",
+   "seconds": 1.1,
+   "credit": "Sonic Pi sample library (from Freesound.org)",
+   "license": "CC0"
+  },
+  {
+   "category": "Robots & Glitch",
+   "name": "Glitch Robot 2",
+   "file": "robots-glitch/glitch-robot-2.mp3",
+   "seconds": 1.0,
+   "credit": "Sonic Pi sample library (from Freesound.org)",
+   "license": "CC0"
+  },
+  {
+   "category": "Robots & Glitch",
+   "name": "Twang",
+   "file": "robots-glitch/twang.mp3",
+   "seconds": 0.7,
+   "credit": "Sonic Pi sample library (from Freesound.org)",
+   "license": "CC0"
+  },
+  {
+   "category": "Robots & Glitch",
+   "name": "Ping",
+   "file": "robots-glitch/ping.mp3",
+   "seconds": 0.3,
+   "credit": "Sonic Pi sample library (from Freesound.org)",
+   "license": "CC0"
+  },
+  {
+   "category": "Robots & Glitch",
+   "name": "Blip",
+   "file": "robots-glitch/blip.mp3",
+   "seconds": 0.2,
+   "credit": "Sonic Pi sample library (from Freesound.org)",
+   "license": "CC0"
+  },
+  {
+   "category": "Robots & Glitch",
+   "name": "Pop",
+   "file": "robots-glitch/pop.mp3",
+   "seconds": 0.1,
+   "credit": "Sonic Pi sample library (from Freesound.org)",
+   "license": "CC0"
+  },
+  {
+   "category": "Robots & Glitch",
+   "name": "Bong",
+   "file": "robots-glitch/bong.mp3",
+   "seconds": 0.4,
+   "credit": "Sonic Pi sample library (from Freesound.org)",
+   "license": "CC0"
+  },
+  {
+   "category": "Robots & Glitch",
+   "name": "Electric Chime",
+   "file": "robots-glitch/electric-chime.mp3",
+   "seconds": 2.3,
+   "credit": "Sonic Pi sample library (from Freesound.org)",
+   "license": "CC0"
+  },
+  {
+   "category": "Robots & Glitch",
+   "name": "Lunar Landing",
+   "file": "robots-glitch/lunar-landing.mp3",
+   "seconds": 7.4,
+   "credit": "Sonic Pi sample library (from Freesound.org)",
+   "license": "CC0"
+  },
+  {
+   "category": "Interface",
+   "name": "Click 1",
+   "file": "interface/click-1.mp3",
+   "seconds": 0.2,
+   "credit": "Kenney (kenney.nl), Interface Sounds",
+   "license": "CC0"
+  },
+  {
+   "category": "Interface",
+   "name": "Click 2",
+   "file": "interface/click-2.mp3",
+   "seconds": 0.1,
+   "credit": "Kenney (kenney.nl), Interface Sounds",
+   "license": "CC0"
+  },
+  {
+   "category": "Interface",
+   "name": "Confirm 1",
+   "file": "interface/confirm-1.mp3",
+   "seconds": 0.3,
+   "credit": "Kenney (kenney.nl), Interface Sounds",
+   "license": "CC0"
+  },
+  {
+   "category": "Interface",
+   "name": "Confirm 2",
+   "file": "interface/confirm-2.mp3",
+   "seconds": 0.6,
+   "credit": "Kenney (kenney.nl), Interface Sounds",
+   "license": "CC0"
+  },
+  {
+   "category": "Interface",
+   "name": "Error 1",
+   "file": "interface/error-1.mp3",
+   "seconds": 0.2,
+   "credit": "Kenney (kenney.nl), Interface Sounds",
+   "license": "CC0"
+  },
+  {
+   "category": "Interface",
+   "name": "Error 2",
+   "file": "interface/error-2.mp3",
+   "seconds": 0.1,
+   "credit": "Kenney (kenney.nl), Interface Sounds",
+   "license": "CC0"
+  },
+  {
+   "category": "Interface",
+   "name": "Glass 1",
+   "file": "interface/glass-1.mp3",
+   "seconds": 0.3,
+   "credit": "Kenney (kenney.nl), Interface Sounds",
+   "license": "CC0"
+  },
+  {
+   "category": "Interface",
+   "name": "Glass 2",
+   "file": "interface/glass-2.mp3",
+   "seconds": 0.8,
+   "credit": "Kenney (kenney.nl), Interface Sounds",
+   "license": "CC0"
+  },
+  {
+   "category": "Interface",
+   "name": "Grow",
+   "file": "interface/grow.mp3",
+   "seconds": 0.3,
+   "credit": "Kenney (kenney.nl), Interface Sounds",
+   "license": "CC0"
+  },
+  {
+   "category": "Interface",
+   "name": "Shrink",
+   "file": "interface/shrink.mp3",
+   "seconds": 0.3,
+   "credit": "Kenney (kenney.nl), Interface Sounds",
+   "license": "CC0"
+  },
+  {
+   "category": "Interface",
+   "name": "Open",
+   "file": "interface/open.mp3",
+   "seconds": 0.2,
+   "credit": "Kenney (kenney.nl), Interface Sounds",
+   "license": "CC0"
+  },
+  {
+   "category": "Interface",
+   "name": "Close",
+   "file": "interface/close.mp3",
+   "seconds": 0.2,
+   "credit": "Kenney (kenney.nl), Interface Sounds",
+   "license": "CC0"
+  },
+  {
+   "category": "Interface",
+   "name": "Pluck 1",
+   "file": "interface/pluck-1.mp3",
+   "seconds": 0.2,
+   "credit": "Kenney (kenney.nl), Interface Sounds",
+   "license": "CC0"
+  },
+  {
+   "category": "Interface",
+   "name": "Pluck 2",
+   "file": "interface/pluck-2.mp3",
+   "seconds": 0.2,
+   "credit": "Kenney (kenney.nl), Interface Sounds",
+   "license": "CC0"
+  },
+  {
+   "category": "Interface",
+   "name": "Question",
+   "file": "interface/question.mp3",
+   "seconds": 0.5,
+   "credit": "Kenney (kenney.nl), Interface Sounds",
+   "license": "CC0"
+  },
+  {
+   "category": "Interface",
+   "name": "Scratch",
+   "file": "interface/scratch.mp3",
+   "seconds": 0.2,
+   "credit": "Kenney (kenney.nl), Interface Sounds",
+   "license": "CC0"
+  },
+  {
+   "category": "Interface",
+   "name": "Select",
+   "file": "interface/select.mp3",
+   "seconds": 0.1,
+   "credit": "Kenney (kenney.nl), Interface Sounds",
+   "license": "CC0"
+  },
+  {
+   "category": "Interface",
+   "name": "Switch",
+   "file": "interface/switch.mp3",
+   "seconds": 0.7,
+   "credit": "Kenney (kenney.nl), Interface Sounds",
+   "license": "CC0"
+  },
+  {
+   "category": "Interface",
+   "name": "Tick",
+   "file": "interface/tick.mp3",
+   "seconds": 0.1,
+   "credit": "Kenney (kenney.nl), Interface Sounds",
+   "license": "CC0"
+  },
+  {
+   "category": "Interface",
+   "name": "Toggle",
+   "file": "interface/toggle.mp3",
+   "seconds": 0.2,
+   "credit": "Kenney (kenney.nl), Interface Sounds",
+   "license": "CC0"
+  },
+  {
+   "category": "Interface",
+   "name": "Drop",
+   "file": "interface/drop.mp3",
+   "seconds": 0.2,
+   "credit": "Kenney (kenney.nl), Interface Sounds",
+   "license": "CC0"
+  },
+  {
+   "category": "Interface",
+   "name": "Bong",
+   "file": "interface/bong.mp3",
+   "seconds": 0.2,
+   "credit": "Kenney (kenney.nl), Interface Sounds",
+   "license": "CC0"
+  },
+  {
+   "category": "Interface",
+   "name": "Glitch",
+   "file": "interface/glitch.mp3",
+   "seconds": 0.1,
+   "credit": "Kenney (kenney.nl), Interface Sounds",
+   "license": "CC0"
+  },
+  {
+   "category": "Interface",
+   "name": "Back",
+   "file": "interface/back.mp3",
+   "seconds": 0.1,
+   "credit": "Kenney (kenney.nl), Interface Sounds",
+   "license": "CC0"
+  },
+  {
+   "category": "Game Blips",
+   "name": "Beep 1",
+   "file": "game-blips/beep1.mp3",
+   "seconds": 0.76,
+   "credit": "User pan14 on Freesound.org",
+   "license": "CC0",
+   "link": "https://freesound.org/people/pan14/sounds/263128/"
+  },
+  {
+   "category": "Game Blips",
+   "name": "Beep 2",
+   "file": "game-blips/beep2.mp3",
+   "seconds": 0.34,
+   "credit": "User pan14 on Freesound.org",
+   "license": "CC0",
+   "link": "https://freesound.org/people/pan14/sounds/263126/"
+  },
+  {
+   "category": "Game Blips",
+   "name": "Blip 1",
+   "file": "game-blips/blip1.mp3",
+   "seconds": 0.21,
+   "credit": "User Raclure on Freesound.org",
+   "license": "CC0",
+   "link": "https://freesound.org/people/Raclure/sounds/405546/"
+  },
+  {
+   "category": "Game Blips",
+   "name": "Blip 2",
+   "file": "game-blips/blip2.mp3",
+   "seconds": 0.31,
+   "credit": "User Leszek_Szary on Freesound.org",
+   "license": "CC0",
+   "link": "https://freesound.org/people/Leszek_Szary/sounds/146727/"
+  },
+  {
+   "category": "Game Blips",
+   "name": "Blip 3",
+   "file": "game-blips/blip3.mp3",
+   "seconds": 0.37,
+   "credit": "User pan14 on Freesound.org",
+   "license": "CC0",
+   "link": "https://freesound.org/people/pan14/sounds/263132/"
+  },
+  {
+   "category": "Game Blips",
+   "name": "Blip 4",
+   "file": "game-blips/blip4.mp3",
+   "seconds": 0.42,
+   "credit": "User pan14 on Freesound.org",
+   "license": "CC0",
+   "link": "https://freesound.org/people/pan14/sounds/263124/"
+  },
+  {
+   "category": "Game Blips",
+   "name": "Blip 5",
+   "file": "game-blips/blip5.mp3",
+   "seconds": 0.31,
+   "credit": "User pan14 on Freesound.org",
+   "license": "CC0",
+   "link": "https://freesound.org/people/pan14/sounds/263129/"
+  },
+  {
+   "category": "Game Blips",
+   "name": "Click 1",
+   "file": "game-blips/click1.mp3",
+   "seconds": 0.05,
+   "credit": "User Raclure on Freesound.org",
+   "license": "CC0",
+   "link": "https://freesound.org/people/Raclure/sounds/483600/"
+  },
+  {
+   "category": "Game Blips",
+   "name": "Fwipp",
+   "file": "game-blips/fwipp.mp3",
+   "seconds": 0.21,
+   "credit": "User Raclure on Freesound.org",
+   "license": "CC0",
+   "link": "https://freesound.org/people/Raclure/sounds/405547/"
+  },
+  {
+   "category": "Game Blips",
+   "name": "Game Bump 1",
+   "file": "game-blips/gameBump1.mp3",
+   "seconds": 0.24,
+   "credit": "User Raclure on Freesound.org",
+   "license": "CC0",
+   "link": "https://freesound.org/people/Raclure/sounds/483602/"
+  },
+  {
+   "category": "Game Blips",
+   "name": "Long Beep 1",
+   "file": "game-blips/longBeep1.mp3",
+   "seconds": 8.72,
+   "credit": "User pan14 on Freesound.org",
+   "license": "CC0",
+   "link": "https://freesound.org/people/pan14/sounds/263130/"
+  },
+  {
+   "category": "Game Blips",
+   "name": "Long Beep 2",
+   "file": "game-blips/longBeep2.mp3",
+   "seconds": 7.08,
+   "credit": "User pan14 on Freesound.org",
+   "license": "CC0",
+   "link": "https://freesound.org/people/pan14/sounds/263127/"
+  },
+  {
+   "category": "Game Blips",
+   "name": "Poof",
+   "file": "game-blips/poof.mp3",
+   "seconds": 0.96,
+   "credit": "User: Planman on Freesound.org",
+   "license": "CC0",
+   "link": "https://freesound.org/people/Planman/sounds/208111/"
+  },
+  {
+   "category": "Game Blips",
+   "name": "Stone 1",
+   "file": "game-blips/stone1.mp3",
+   "seconds": 0.68,
+   "credit": "User: Mediaman57 on Freesound.org",
+   "license": "CC0",
+   "link": "https://freesound.org/people/Mediaman57/sounds/347149/"
+  },
+  {
+   "category": "Game Blips",
+   "name": "Stone 2",
+   "file": "game-blips/stone2.mp3",
+   "seconds": 3.11,
+   "credit": "User: ertfelda on Freesound.org",
+   "license": "CC0",
+   "link": "https://freesound.org/people/ertfelda/sounds/243699/"
+  },
+  {
+   "category": "Game Blips",
+   "name": "Thump",
+   "file": "game-blips/thump.mp3",
+   "seconds": 0.34,
+   "credit": "User OtisJames on Freesound.org",
+   "license": "CC0",
+   "link": "https://freesound.org/people/OtisJames/sounds/249613/"
+  },
+  {
+   "category": "Game Blips",
+   "name": "Thunk",
+   "file": "game-blips/thunk.mp3",
+   "seconds": 0.29,
+   "credit": "User jameswrowles on Freesound.org",
+   "license": "CC0",
+   "link": "https://freesound.org/people/jameswrowles/sounds/380640/"
+  },
+  {
+   "category": "Game Blips",
+   "name": "Woop 1",
+   "file": "game-blips/woop1.mp3",
+   "seconds": 0.26,
+   "credit": "User Raclure on Freesound.org",
+   "license": "CC0",
+   "link": "https://freesound.org/people/Raclure/sounds/483604/"
+  },
+  {
+   "category": "Game Blips",
+   "name": "Woop 2",
+   "file": "game-blips/woop2.mp3",
+   "seconds": 0.31,
+   "credit": "User Raclure on Freesound.org",
+   "license": "CC0",
+   "link": "https://freesound.org/people/Raclure/sounds/483603/"
+  },
+  {
+   "category": "Game Blips",
+   "name": "Woop 3",
+   "file": "game-blips/woop3.mp3",
+   "seconds": 0.24,
+   "credit": "User Raclure on Freesound.org",
+   "license": "CC0",
+   "link": "https://freesound.org/people/Raclure/sounds/405548/"
+  },
+  {
+   "category": "Game Blips",
+   "name": "Woosh",
+   "file": "game-blips/woosh.mp3",
+   "seconds": 0.94,
+   "credit": "User freakinbehemoth on Freesound.org",
+   "license": "CC0",
+   "link": "https://freesound.org/people/freakinbehemoth/sounds/243400/"
+  },
+  {
+   "category": "Game Blips",
+   "name": "Wrong 1",
+   "file": "game-blips/wrong1.mp3",
+   "seconds": 0.31,
+   "credit": "User Raclure on Freesound.org",
+   "license": "CC0",
+   "link": "https://freesound.org/people/Raclure/sounds/483598/"
+  },
+  {
+   "category": "Game Blips",
+   "name": "Wrong 2",
+   "file": "game-blips/wrong2.mp3",
+   "seconds": 1.28,
+   "credit": "User pan14 on Freesound.org",
+   "license": "CC0",
+   "link": "https://freesound.org/people/pan14/sounds/263123/"
+  },
+  {
+   "category": "Game Blips",
+   "name": "Zhoop",
+   "file": "game-blips/zhoop.mp3",
+   "seconds": 0.73,
+   "credit": "User Raclure on Freesound.org",
+   "license": "CC0",
+   "link": "https://freesound.org/people/Raclure/sounds/483608/"
+  }
+ ]
+}

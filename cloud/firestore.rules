@@ -1,0 +1,78 @@
+rules_version = '2';
+
+// Security rules for animate.jabari.art online saves (Cloud Firestore).
+// Paste this whole file into Firebase console > Firestore Database > Rules, then Publish.
+//
+// Who can do what:
+//   Teachers (accounts listed in /teachers) can do everything.
+//   Students can read and write only their own projects, and read Learn and Class Sounds.
+//   Anyone can read the class list (picture names only) so students can pick their picture before signing in.
+
+service cloud.firestore {
+  match /databases/{database}/documents {
+
+    function signedIn() { return request.auth != null; }
+    function isTeacher() { return signedIn() && exists(/databases/$(database)/documents/teachers/$(request.auth.uid)); }
+    function isStudent() { return signedIn() && exists(/databases/$(database)/documents/students/$(request.auth.uid)); }
+    function studentClass() { return get(/databases/$(database)/documents/students/$(request.auth.uid)).data.classId; }
+    function ownsProject(id) {
+      return signedIn() && get(/databases/$(database)/documents/projects/$(id)).data.owner == request.auth.uid;
+    }
+
+    // Teacher accounts. Add these by hand in the console (document ID = the account's UID).
+    match /teachers/{uid} {
+      allow read: if signedIn() && request.auth.uid == uid;
+      allow write: if false;
+    }
+
+    match /classes/{classId} {
+      allow read: if true;
+      allow write: if isTeacher();
+    }
+
+    // PINs, so login cards can be reprinted.
+    match /classSecrets/{classId} {
+      allow read, write: if isTeacher();
+    }
+
+    match /students/{uid} {
+      allow read: if isTeacher() || (signedIn() && request.auth.uid == uid);
+      allow write: if isTeacher();
+    }
+
+    match /projects/{id} {
+      // resource == null lets the app check whether a new project already exists.
+      allow read: if isTeacher() || (signedIn() && (resource == null || resource.data.owner == request.auth.uid));
+      allow create: if isTeacher()
+        || (isStudent() && request.resource.data.owner == request.auth.uid && request.resource.data.classId == studentClass());
+      allow update: if isTeacher()
+        || (signedIn() && resource.data.owner == request.auth.uid && request.resource.data.owner == request.auth.uid
+            && request.resource.data.classId == resource.data.classId);
+      allow delete: if isTeacher() || (signedIn() && resource.data.owner == request.auth.uid);
+
+      match /chunks/{chunk} {
+        allow read, write: if isTeacher() || ownsProject(id);
+      }
+    }
+
+    // Learn examples published from teacher mode.
+    match /learn/{id} {
+      allow read: if true;
+      allow write: if isTeacher();
+      match /chunks/{chunk} {
+        allow read: if true;
+        allow write: if isTeacher();
+      }
+    }
+
+    // Class Sounds: only signed-in students and teachers can hear or use them.
+    match /classSounds/{id} {
+      allow read: if signedIn();
+      allow write: if isTeacher();
+      match /chunks/{chunk} {
+        allow read: if signedIn();
+        allow write: if isTeacher();
+      }
+    }
+  }
+}

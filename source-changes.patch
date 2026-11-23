@@ -1,3 +1,43 @@
+diff --git a/engine/src/ToolSettings.js b/engine/src/ToolSettings.js
+index 597344c..d9043e1 100644
+--- a/engine/src/ToolSettings.js
++++ b/engine/src/ToolSettings.js
+@@ -108,6 +108,20 @@ Wick.ToolSettings = class {
+             name: 'brushMode',
+             default: 'none',
+             options: ['none', 'behind', 'inside']
++        }, {
++            type: "choice",
++            name: 'brushTexture',
++            default: 'none',
++            options: ['none', 'crayon', 'chalk', 'charcoal', 'spray']
++        }, {
++            type: "choice",
++            name: 'artLayer',
++            default: 'line',
++            options: ['line', 'color']
++        }, {
++            type: "boolean",
++            name: 'bucketFillsColor',
++            default: true
+         }];
+     }
+ 
+diff --git a/engine/src/base/Path.js b/engine/src/base/Path.js
+index dec5f33..0333254 100644
+--- a/engine/src/base/Path.js
++++ b/engine/src/base/Path.js
+@@ -87,7 +87,10 @@ Wick.Path = class extends Wick.Base {
+         var data = super._serialize(args);
+ 
+         data.json = this.json;
++        // Keep only the Line/Color art tag; drop runtime data (uuids, view state)
++        var artLayer = data.json[1].data && data.json[1].data.artLayer;
+         delete data.json[1].data;
++        if (artLayer) data.json[1].data = { artLayer: artLayer };
+ 
+         // optimization: replace dataurls with asset uuids
+         if (data.json[0] === 'Raster' && data.json[1].source.startsWith('data:')) {
 diff --git a/engine/src/base/Project.js b/engine/src/base/Project.js
 index 498bb9f..b017336 100644
 --- a/engine/src/base/Project.js
@@ -36,6 +76,637 @@ index 940057c..d08f07a 100644
      }
  
      /**
+diff --git a/engine/src/tools/ArtLayers.js b/engine/src/tools/ArtLayers.js
+new file mode 100644
+index 0000000..e9ab8ea
+--- /dev/null
++++ b/engine/src/tools/ArtLayers.js
+@@ -0,0 +1,138 @@
++/*
++ * Line Art / Color Art for Wick layers (in the spirit of Toon Boom Harmony).
++ *
++ * Every layer stays a single timeline row. Each path drawn into a frame is
++ * tagged as 'line' or 'color' (stored in the paper.js item's data, so it is
++ * saved with the project). Within a frame, color art is always kept below
++ * everything else, so line art sits on top no matter what order things were
++ * drawn in. Either kind can be hidden while editing; hiding never affects
++ * exports or published projects.
++ *
++ * Untagged content (older projects, images, text, clips) is treated like line
++ * art for stacking: it stays above color art.
++ *
++ * This file is part of a modified version of Wick Editor and is licensed
++ * under the GNU General Public License v3 or later.
++ */
++
++Wick.ArtLayers = {
++    LINE: 'line',
++    COLOR: 'color',
++
++    /* View toggles. Not saved with the project or settings, so every session starts with both visible. */
++    showLine: true,
++    showColor: true,
++
++    /* Called after a visibility change so the editor can re-render the canvas. */
++    onVisibilityChange: null,
++
++    /* UI listeners (e.g. the toolbar switch) told whenever visibility changes. */
++    _listeners: [],
++
++    subscribe: function (fn) {
++        Wick.ArtLayers._listeners.push(fn);
++        return function () {
++            Wick.ArtLayers._listeners = Wick.ArtLayers._listeners.filter(function (f) { return f !== fn; });
++        };
++    },
++
++    _notify: function () {
++        Wick.ArtLayers._listeners.forEach(function (fn) { fn(); });
++    },
++
++    typeOf: function (item) {
++        var t = item && item.data && item.data.artLayer;
++        return t === 'color' || t === 'line' ? t : null;
++    },
++
++    isColor: function (item) {
++        return Wick.ArtLayers.typeOf(item) === 'color';
++    },
++
++    setVisible: function (type, visible) {
++        if (type === 'color') Wick.ArtLayers.showColor = !!visible;
++        if (type === 'line') Wick.ArtLayers.showLine = !!visible;
++        Wick.ArtLayers._notify();
++        if (Wick.ArtLayers.onVisibilityChange) Wick.ArtLayers.onVisibilityChange();
++    },
++
++    /* Hide or re-show an item on the editing canvas to match the Line/Color toggles. */
++    applyVisibility: function (item) {
++        var t = Wick.ArtLayers.typeOf(item);
++        if ((t === 'color' && !Wick.ArtLayers.showColor) || (t === 'line' && !Wick.ArtLayers.showLine)) {
++            item.visible = false;
++            item.data.artHidden = true;
++        } else {
++            // Canvas items are reused between renders, so undo an earlier hide
++            Wick.ArtLayers.restoreVisibility(item);
++        }
++    },
++
++    /* Undo applyVisibility before an item is saved, so hiding never gets stored in the project. */
++    restoreVisibility: function (item) {
++        if (item && item.data && item.data.artHidden) {
++            item.visible = true;
++            delete item.data.artHidden;
++        }
++    },
++
++    _content: function (layer, except) {
++        return layer.children.filter(function (child) {
++            return child !== except && !(child.data && child.data.wickType === 'gui');
++        });
++    },
++
++    /*
++     * Tag an item and insert it into a paper layer at the right depth.
++     * position: 'top' or 'bottom' of its own stack (color stack or line stack).
++     */
++    place: function (item, type, layer, position) {
++        type = type === 'color' ? 'color' : 'line';
++        item.data = item.data || {};
++        item.data.artLayer = type;
++
++        // Drawing into a hidden art type turns it back on, so the new stroke doesn't vanish.
++        // (Only the flag changes here; the canvas re-renders with it after the edit is applied.)
++        if (type === 'color' && !Wick.ArtLayers.showColor) { Wick.ArtLayers.showColor = true; Wick.ArtLayers._notify(); }
++        if (type === 'line' && !Wick.ArtLayers.showLine) { Wick.ArtLayers.showLine = true; Wick.ArtLayers._notify(); }
++
++        var content = Wick.ArtLayers._content(layer, item);
++        var colors = content.filter(Wick.ArtLayers.isColor);
++        var others = content.filter(function (c) { return !Wick.ArtLayers.isColor(c); });
++
++        if (type === 'color') {
++            if (position === 'bottom' && content.length) {
++                item.insertBelow(content[0]);
++            } else if (others.length) {
++                // top of the color stack = just under the lowest line art
++                item.insertBelow(others[0]);
++            } else {
++                layer.addChild(item);
++            }
++        } else {
++            if (position === 'bottom') {
++                if (colors.length) {
++                    item.insertAbove(colors[colors.length - 1]);
++                } else if (content.length) {
++                    item.insertBelow(content[0]);
++                } else {
++                    layer.addChild(item);
++                }
++            } else {
++                layer.addChild(item);
++            }
++        }
++    },
++
++    /* Move all color art below everything else in a frame, keeping each group's own order. */
++    normalize: function (layer) {
++        var children = layer.children.slice();
++        var colors = children.filter(Wick.ArtLayers.isColor);
++        if (colors.length === 0) return;
++
++        var others = children.filter(function (c) { return !Wick.ArtLayers.isColor(c); });
++        var ordered = colors.concat(others);
++        var inOrder = ordered.every(function (c, i) { return children[i] === c; });
++        if (!inOrder) layer.addChildren(ordered);
++    },
++};
+diff --git a/engine/src/tools/Brush.js b/engine/src/tools/Brush.js
+index 4193108..947545f 100644
+--- a/engine/src/tools/Brush.js
++++ b/engine/src/tools/Brush.js
+@@ -133,6 +133,7 @@ Wick.Tools.Brush = class extends Wick.Tool {
+         this.croquis.setToolStabilizeLevel(this.BRUSH_STABILIZER_LEVEL);
+         this.croquis.setToolStabilizeWeight((this.getSetting('brushStabilizerWeight') / 100.0) + 0.3);
+         this.croquis.setToolStabilizeInterval(1);
++        this._setupBrushTexture();
+ 
+         // Forward mouse event to croquis canvas
+         var point = this._croquisToPaperPoint(e.point);
+@@ -154,6 +155,7 @@ Wick.Tools.Brush = class extends Wick.Tool {
+         this._updateStrokeBounds(point);
+         try {
+             this._updateLastMouseState(point, this.pressure);
++            this._nextSprayStamp();
+             this.croquis.move(point.x, point.y, this.pressure);
+         } catch (e) {
+             this.handleBrushError(e);
+@@ -320,6 +322,10 @@ Wick.Tools.Brush = class extends Wick.Tool {
+     _potraceCroquisCanvas (point) {
+         this.errorOccured = false;
+         var strokeBounds = this.strokeBounds.clone();
++        // Textured strokes get rough edges that reach past the brush outline, so trace a wider area
++        if (Wick.BrushTextures.isGrain(this._strokeTexture)) {
++            strokeBounds = strokeBounds.expand(this._strokeSize * 1.5);
++        }
+ 
+         // Attempting to draw with a transparent fill color. Throw an error.
+         if (this.getSetting('fillColor').a === 0) {
+@@ -351,9 +357,14 @@ Wick.Tools.Brush = class extends Wick.Tool {
+               strokeBounds.x, strokeBounds.y,
+               strokeBounds.width, strokeBounds.height,
+               0, 0, croppedCanvas.width, croppedCanvas.height);
++            // Bake the brush texture grain into the stroke before tracing it
++            var grainOffset = this._grainOffset();
++            Wick.BrushTextures.applyGrain(croppedCanvas, this._strokeTexture,
++                strokeBounds.x + grainOffset.x, strokeBounds.y + grainOffset.y, this._strokeSize);
++
+ 
+             // Run potrace and add the resulting path to the project
+-            var svg = potrace.fromImage(croppedCanvas).toSVG(1/this.POTRACE_RESOLUTION/this.paper.view.zoom);
++            var svg = potrace.fromImage(croppedCanvas, Wick.BrushTextures.potraceOptions(this._strokeTexture)).toSVG(1/this.POTRACE_RESOLUTION/this.paper.view.zoom);
+             var potracePath = this.paper.project.importSVG(svg);
+ 
+             potracePath.fillColor = this.getSetting('fillColor').rgba;
+@@ -431,4 +442,50 @@ Wick.Tools.Brush = class extends Wick.Tool {
+         result.remove();
+         return result;
+     }
++
++    /* Set up the textured brush tip (if any) for the stroke that's starting. */
++    _setupBrushTexture () {
++        var texture = this.getSetting('brushTexture') || 'none';
++        if (Wick.BrushTextures.NAMES.indexOf(texture) === -1) texture = 'none';
++        this._strokeTexture = texture;
++        this._strokeSize = this._getRealBrushSize();
++
++        if (texture === 'spray') {
++            this._sprayStamps = Wick.BrushTextures.makeSprayStamps(this._getRealBrushSize());
++            this._sprayIndex = 0;
++            this.croquisBrush.setImage(this._sprayStamps[0]);
++            this.croquisBrush.setSpacing(0.3);
++            this.croquisBrush.setNormalSpread(0.25);
++            this.croquisBrush.setTangentSpread(0.25);
++        } else {
++            this._sprayStamps = null;
++            this.croquisBrush.setImage(null);
++            this.croquisBrush.setNormalSpread(0);
++            this.croquisBrush.setTangentSpread(0);
++        }
++
++        // Show the grain on the stroke while it's being drawn
++        var ratio = 1;
++        if (this.croquisDOMElement.clientWidth && this.croquis.getCanvasWidth()) {
++            ratio = this.croquisDOMElement.clientWidth / this.croquis.getCanvasWidth();
++        }
++        var offset = this._grainOffset();
++        Wick.BrushTextures.setPreviewMask(this.croquisDOMElement, texture, offset.x, offset.y, ratio);
++    }
++
++    /* Swap between spray stamps so a stroke doesn't show a repeating dot pattern. */
++    _nextSprayStamp () {
++        if (!this._sprayStamps) return;
++        this._sprayIndex = (this._sprayIndex + 1) % this._sprayStamps.length;
++        this.croquisBrush.setImage(this._sprayStamps[this._sprayIndex]);
++    }
++
++    /* Where the croquis canvas origin sits in grain space, so grain stays fixed to the drawing. */
++    _grainOffset () {
++        var zoom = this.paper.view.zoom;
++        return {
++            x: this.paper.view.bounds.x * zoom,
++            y: this.paper.view.bounds.y * zoom,
++        };
++    }
+ }
+diff --git a/engine/src/tools/BrushTextures.js b/engine/src/tools/BrushTextures.js
+new file mode 100644
+index 0000000..4dd5733
+--- /dev/null
++++ b/engine/src/tools/BrushTextures.js
+@@ -0,0 +1,282 @@
++/*
++ * Textured brush tips for the Wick brush tool.
++ *
++ * The brush paints a stroke into a raster canvas (Croquis) and then traces it
++ * into a vector shape with potrace. Grain textures (crayon, chalk, charcoal)
++ * are applied as a mask to that raster just before tracing, so the grain
++ * becomes part of the vector shape. Spray paints with randomized dot stamps.
++ *
++ * Everything is generated procedurally from a fixed seed, so the grain looks
++ * the same every time the editor loads.
++ */
++
++Wick.BrushTextures = (function () {
++    var TILE = 256;
++    var NAMES = ['none', 'crayon', 'chalk', 'charcoal', 'spray'];
++    var GRAINS = ['crayon', 'chalk', 'charcoal'];
++
++    var tileCache = {};
++    var tileURLCache = {};
++
++    function rng (seed) {
++        return function () {
++            seed |= 0; seed = seed + 0x6D2B79F5 | 0;
++            var t = Math.imul(seed ^ seed >>> 15, 1 | seed);
++            t = t + Math.imul(t ^ t >>> 7, 61 | t) ^ t;
++            return ((t ^ t >>> 14) >>> 0) / 4294967296;
++        };
++    }
++
++    /* Seamless value noise over a TILE x TILE square. cellX/cellY = cell size in px. */
++    function makeNoise (seed, cellX, cellY) {
++        var rand = rng(seed);
++        var gw = Math.max(1, Math.round(TILE / cellX));
++        var gh = Math.max(1, Math.round(TILE / cellY));
++        var grid = new Float32Array(gw * gh);
++        for (var i = 0; i < grid.length; i++) grid[i] = rand();
++        var sx = gw / TILE, sy = gh / TILE;
++        return function (x, y) {
++            var fx = x * sx, fy = y * sy;
++            var x0 = Math.floor(fx), y0 = Math.floor(fy);
++            var tx = fx - x0, ty = fy - y0;
++            tx = tx * tx * (3 - 2 * tx);
++            ty = ty * ty * (3 - 2 * ty);
++            var x1 = (x0 + 1) % gw, y1 = (y0 + 1) % gh;
++            x0 = x0 % gw; y0 = y0 % gh;
++            var a = grid[y0 * gw + x0], b = grid[y0 * gw + x1];
++            var c = grid[y1 * gw + x0], d = grid[y1 * gw + x1];
++            return (a + (b - a) * tx) + ((c + (d - c) * tx) - (a + (b - a) * tx)) * ty;
++        };
++    }
++
++    /* Returns 0..1 grain value for each texture. Pixels above the threshold are kept. */
++    var RECIPES = {
++        crayon: function () {
++            var fine = makeNoise(11, 3, 3), mid = makeNoise(12, 8, 8), tooth = makeNoise(13, 4, 12);
++            return { threshold: 0.33, value: function (x, y) {
++                return 0.4 * fine(x, y) + 0.35 * mid(x, y) + 0.25 * tooth(x, y);
++            }};
++        },
++        chalk: function () {
++            var fine = makeNoise(21, 2, 2), mid = makeNoise(22, 6, 6), coarse = makeNoise(23, 16, 16);
++            return { threshold: 0.47, value: function (x, y) {
++                return 0.4 * fine(x, y) + 0.35 * mid(x, y) + 0.25 * coarse(x, y);
++            }};
++        },
++        charcoal: function () {
++            var streak = makeNoise(31, 32, 3), blotch = makeNoise(32, 16, 10), fine = makeNoise(33, 3, 3);
++            return { threshold: 0.40, value: function (x, y) {
++                return 0.4 * streak(x, y) + 0.3 * blotch(x, y) + 0.3 * fine(x, y);
++            }};
++        },
++    };
++
++    /*
++     * Edge roughness for each texture.
++     * amp: how far the noise pushes the outline in and out (in blurred-alpha units).
++     * blur: edge softening radius as a fraction of brush size, before re-thresholding.
++     */
++    var EDGES = {
++        crayon: { amp: 0.75, blur: 0.12, field: function () {
++            var a = makeNoise(41, 3, 3), b = makeNoise(42, 7, 7);
++            return function (x, y) { return 0.55 * a(x, y) + 0.45 * b(x, y); };
++        }},
++        chalk: { amp: 1.3, blur: 0.18, field: function () {
++            var a = makeNoise(51, 2, 2), b = makeNoise(52, 5, 5), c = makeNoise(53, 12, 12);
++            return function (x, y) { return 0.4 * a(x, y) + 0.35 * b(x, y) + 0.25 * c(x, y); };
++        }},
++        charcoal: { amp: 1.1, blur: 0.16, field: function () {
++            var a = makeNoise(61, 24, 3), b = makeNoise(62, 3, 3), c = makeNoise(63, 10, 10);
++            return function (x, y) { return 0.45 * a(x, y) + 0.3 * b(x, y) + 0.25 * c(x, y); };
++        }},
++    };
++    var edgeFieldCache = {};
++
++    function getEdgeField (name) {
++        if (edgeFieldCache[name]) return edgeFieldCache[name];
++        var f = EDGES[name].field();
++        var field = new Float32Array(TILE * TILE);
++        var min = Infinity, max = -Infinity;
++        for (var y = 0; y < TILE; y++) {
++            for (var x = 0; x < TILE; x++) {
++                var v = f(x, y);
++                field[y * TILE + x] = v;
++                if (v < min) min = v;
++                if (v > max) max = v;
++            }
++        }
++        // stretch to the full 0..1 range so amp means the same thing for every texture
++        for (var i = 0; i < field.length; i++) field[i] = (field[i] - min) / (max - min);
++        edgeFieldCache[name] = field;
++        return field;
++    }
++
++    /* In-place separable box blur of a Float32 array (w x h), radius r. */
++    function boxBlur (src, w, h, r) {
++        if (r < 1) return src;
++        var tmp = new Float32Array(src.length);
++        var norm = 1 / (2 * r + 1);
++        var x, y, acc, i;
++        for (y = 0; y < h; y++) {
++            var row = y * w;
++            acc = 0;
++            for (x = -r; x <= r; x++) acc += src[row + Math.min(w - 1, Math.max(0, x))];
++            for (x = 0; x < w; x++) {
++                tmp[row + x] = acc * norm;
++                acc += src[row + Math.min(w - 1, x + r + 1)] - src[row + Math.max(0, x - r)];
++            }
++        }
++        for (x = 0; x < w; x++) {
++            acc = 0;
++            for (y = -r; y <= r; y++) acc += tmp[Math.min(h - 1, Math.max(0, y)) * w + x];
++            for (y = 0; y < h; y++) {
++                src[y * w + x] = acc * norm;
++                acc += tmp[Math.min(h - 1, y + r + 1) * w + x] - tmp[Math.max(0, y - r) * w + x];
++            }
++        }
++        return src;
++    }
++
++    /* A TILE x TILE canvas, opaque where paint stays, transparent where grain shows through. */
++    function getTile (name) {
++        if (tileCache[name]) return tileCache[name];
++        var recipe = RECIPES[name]();
++        var canvas = document.createElement('canvas');
++        canvas.width = TILE;
++        canvas.height = TILE;
++        var ctx = canvas.getContext('2d');
++        var img = ctx.createImageData(TILE, TILE);
++        for (var y = 0; y < TILE; y++) {
++            for (var x = 0; x < TILE; x++) {
++                var i = (y * TILE + x) * 4;
++                img.data[i] = img.data[i + 1] = img.data[i + 2] = 255;
++                img.data[i + 3] = recipe.value(x, y) > recipe.threshold ? 255 : 0;
++            }
++        }
++        ctx.putImageData(img, 0, 0);
++        tileCache[name] = canvas;
++        return canvas;
++    }
++
++    function getTileURL (name) {
++        if (!tileURLCache[name]) tileURLCache[name] = getTile(name).toDataURL('image/png');
++        return tileURLCache[name];
++    }
++
++    function isGrain (name) {
++        return GRAINS.indexOf(name) !== -1;
++    }
++
++    /*
++     * Texture a canvas holding a painted stroke: roughen its outline, then
++     * knock the grain out of it. The result is hard-edged (opaque or clear),
++     * ready for potrace.
++     * offsetX/offsetY: where this canvas's (0,0) sits in the anchored grain space,
++     * so the grain stays put on the drawing instead of following each stroke.
++     * brushSize: the stroke's brush size in canvas pixels (scales the edge roughness).
++     */
++    function applyGrain (canvas, name, offsetX, offsetY, brushSize) {
++        if (!isGrain(name)) return;
++        var w = canvas.width, h = canvas.height;
++        if (!w || !h) return;
++        var ctx = canvas.getContext('2d');
++        var img = ctx.getImageData(0, 0, w, h);
++        var data = img.data;
++        var ox = ((Math.round(offsetX) % TILE) + TILE) % TILE;
++        var oy = ((Math.round(offsetY) % TILE) + TILE) % TILE;
++
++        var edge = EDGES[name];
++        var field = getEdgeField(name);
++        var size = brushSize || 20;
++        var r = Math.max(1, Math.min(14, Math.round(size * edge.blur)));
++
++        // Blurred coverage: 1 deep inside the stroke, falling to 0 just outside it
++        var cov = new Float32Array(w * h);
++        for (var i = 0, j = 3; i < cov.length; i++, j += 4) cov[i] = data[j] / 255;
++        boxBlur(cov, w, h, r);
++        boxBlur(cov, w, h, r);
++
++        var grain = getTile(name).getContext('2d').getImageData(0, 0, TILE, TILE).data;
++
++        for (var y = 0; y < h; y++) {
++            var ty = ((y + oy) % TILE) * TILE;
++            for (var x = 0; x < w; x++) {
++                var p = y * w + x;
++                var c = cov[p];
++                var a = 0;
++                if (c > 0.02) {
++                    var t = ty + ((x + ox) % TILE);
++                    // Noise pushes the outline in and out; grain cuts holes inside
++                    if (c + edge.amp * (field[t] - 0.5) > 0.5 && grain[t * 4 + 3] > 0) a = 255;
++                }
++                data[p * 4 + 3] = a;
++            }
++        }
++        ctx.putImageData(img, 0, 0);
++    }
++
++    /* Show the grain on the live (pre-trace) stroke using a CSS mask. */
++    function setPreviewMask (element, name, offsetX, offsetY, ratio) {
++        var style = element.style;
++        if (!isGrain(name)) {
++            style.webkitMaskImage = style.maskImage = '';
++            return;
++        }
++        ratio = ratio || 1;
++        var url = 'url(' + getTileURL(name) + ')';
++        var ox = ((Math.round(offsetX) % TILE) + TILE) % TILE;
++        var oy = ((Math.round(offsetY) % TILE) + TILE) % TILE;
++        style.webkitMaskImage = style.maskImage = url;
++        style.webkitMaskSize = style.maskSize = (TILE * ratio) + 'px ' + (TILE * ratio) + 'px';
++        style.webkitMaskRepeat = style.maskRepeat = 'repeat';
++        style.webkitMaskPosition = style.maskPosition = (-ox * ratio) + 'px ' + (-oy * ratio) + 'px';
++    }
++
++    var sprayRand = rng(4242);
++
++    /* A stamp of random dots, denser toward the middle, at the brush's pixel size. */
++    function makeSprayStamp (size) {
++        size = Math.max(4, Math.round(size));
++        var canvas = document.createElement('canvas');
++        canvas.width = canvas.height = size;
++        var ctx = canvas.getContext('2d');
++        ctx.fillStyle = '#fff';
++        var r = size / 2;
++        var dotR = Math.max(1.3, size * 0.022);
++        var count = Math.max(6, Math.round(size * 0.9));
++        for (var i = 0; i < count; i++) {
++            var a = sprayRand() * Math.PI * 2;
++            var d = Math.pow(sprayRand(), 0.75) * (r - dotR);
++            var dr = dotR * (0.7 + sprayRand() * 0.8);
++            ctx.beginPath();
++            ctx.arc(r + Math.cos(a) * d, r + Math.sin(a) * d, dr, 0, Math.PI * 2);
++            ctx.fill();
++        }
++        return canvas;
++    }
++
++    /* A few different stamps so a stroke doesn't show a repeating pattern. */
++    function makeSprayStamps (size) {
++        var stamps = [];
++        for (var i = 0; i < 6; i++) stamps.push(makeSprayStamp(size));
++        return stamps;
++    }
++
++    /* Tracing options: drop specks too small to see and simplify grainy outlines. */
++    function potraceOptions (name) {
++        if (name === 'spray') return { turdSize: 2, optTolerance: 0.4 };
++        if (isGrain(name)) return { turdSize: 4, optTolerance: 0.45 };
++        return {};
++    }
++
++    return {
++        TILE: TILE,
++        NAMES: NAMES,
++        isGrain: isGrain,
++        getTile: getTile,
++        applyGrain: applyGrain,
++        setPreviewMask: setPreviewMask,
++        makeSprayStamps: makeSprayStamps,
++        potraceOptions: potraceOptions,
++    };
++})();
+diff --git a/engine/src/tools/FillBucket.js b/engine/src/tools/FillBucket.js
+index 0c71650..d6bc698 100644
+--- a/engine/src/tools/FillBucket.js
++++ b/engine/src/tools/FillBucket.js
+@@ -72,11 +72,13 @@ Wick.Tools.FillBucket = class extends Wick.Tool {
+                         path.fillColor = this.getSetting('fillColor').rgba;
+                         path.name = null;
+                         this.addPathToProject();
+-                        if (e.item) {
++                        // Fills go into Color Art unless the "bucket fills color" setting is off
++                        var artType = this.getSetting('bucketFillsColor') ? 'color' : this.artLayerType;
++                        if (e.item && Wick.ArtLayers.typeOf(e.item) === artType) {
++                            path.data.artLayer = artType;
+                             path.insertAbove(e.item);
+                         } else {
+-                            this.paper.project.activeLayer.addChild(path);
+-                            this.paper.OrderingUtils.sendToBack([path]);
++                            Wick.ArtLayers.place(path, artType, this.paper.project.activeLayer, artType === 'color' ? 'top' : 'bottom');
+                         }
+                         this.fireEvent({eventName:'canvasModified', actionName:'fillbucket'});
+                     }
+diff --git a/engine/src/tools/Tool.js b/engine/src/tools/Tool.js
+index 0c44122..caf860a 100644
+--- a/engine/src/tools/Tool.js
++++ b/engine/src/tools/Tool.js
+@@ -260,6 +260,19 @@ Wick.Tool = class {
+         return true;
+     }
+ 
++    /**
++
++     * Which art layer new strokes go into: 'line' or 'color' (from the Line/Color switch).
++
++     */
++
++    get artLayerType() {
++
++        return this.getSetting('artLayer') === 'color' ? 'color' : 'line';
++
++    }
++
++
+     /**
+      * Adds a paper.Path to the active frame's paper.Layer.
+      * @param {paper.Path} path - the path to add
+@@ -291,6 +304,7 @@ Wick.Tool = class {
+         if(frame && frame !== this.project.activeFrame) {
+             /* If the path must be added to a frame other than the active frame,
+              * convert the paper.js path into a Wick path and add it to the given frame. */
++            path.data.artLayer = this.artLayerType;
+             var wickPath = new Wick.Path({
+                 json: path.exportJSON({asString:false}),
+             });
+@@ -299,7 +313,7 @@ Wick.Tool = class {
+             /* Otherwise, directly add the paper.js path to the paper.js project.
+                This is signifigantly faster than creating the Wick path, as this
+                method does not require a re-render of the canvas. */
+-            this.paper.project.activeLayer.addChild(path);
++            Wick.ArtLayers.place(path, this.artLayerType, this.paper.project.activeLayer, 'top');
+         }
+     }
+ }
+diff --git a/engine/src/view/View.Frame.js b/engine/src/view/View.Frame.js
+index bb71441..aac94b5 100644
+--- a/engine/src/view/View.Frame.js
++++ b/engine/src/view/View.Frame.js
+@@ -80,11 +80,22 @@ Wick.View.Frame = class extends Wick.View {
+             }
+         });
+ 
++        // Hide line or color art on the editing canvas when switched off (never when published)
++
++        if (!(this.model.project && this.model.project.isPublished)) {
++
++            children.forEach(child => Wick.ArtLayers.applyVisibility(child));
++
++        }
++
+         this.objectsLayer.addChildren(children);
+     }
+ 
+     _applyDrawableChanges() {
+ 
++        // Keep color art below line art
++        Wick.ArtLayers.normalize(this.objectsLayer);
++
+         this.model.drawable.filter(path => {
+             return path instanceof Wick.Path && path.isDynamicText;
+         }).forEach(path => {
+diff --git a/engine/src/view/View.Path.js b/engine/src/view/View.Path.js
+index 280d464..872904e 100644
+--- a/engine/src/view/View.Path.js
++++ b/engine/src/view/View.Path.js
+@@ -109,6 +109,7 @@ Wick.View.Path = class extends Wick.View {
+      * Export a path as paper.js Path json data.
+      */
+     static exportJSON (item) {
++        Wick.ArtLayers.restoreVisibility(item);
+         // Recover original style (if needed - only neccesary if style was overritten by custom onion skin style)
+         if(item.data.originalStyle) {
+             item.strokeColor = item.data.originalStyle.strokeColor;
 diff --git a/engine/src/view/View.Timeline.js b/engine/src/view/View.Timeline.js
 index 7cb9e16..2978df3 100644
 --- a/engine/src/view/View.Timeline.js
@@ -50,6 +721,92 @@ index 7cb9e16..2978df3 100644
              return layer.project.isPublished || !layer.hidden;
          }).reverse();
  
+diff --git a/engine/src/view/paper-ext/Layer.erase.js b/engine/src/view/paper-ext/Layer.erase.js
+index fcd81ca..0c428bf 100644
+--- a/engine/src/view/paper-ext/Layer.erase.js
++++ b/engine/src/view/paper-ext/Layer.erase.js
+@@ -28,6 +28,11 @@
+ (function () {
+ 
+     // Splits a CompoundPath with multiple CW children into individual pieces
++    function artOnly(p) {
++        // Keep the Line/Color art tag when the eraser rebuilds a shape
++        return (p && p.data && p.data.artLayer) ? { artLayer: p.data.artLayer } : {};
++    }
++
+     function splitCompoundPath (compoundPath) {
+         // Create lists of 'holes' (CCW children) and 'parts' (CW children)
+         var holes = [];
+@@ -37,7 +42,7 @@
+                 holes.push(child);
+             } else {
+                 var part = child.clone({insert:false});
+-                part.fillColor = compoundPath.fillColor;
++                part.fillColor = compoundPath.fillColor; part.data = Object.assign({}, compoundPath.data);
+                 part.insertAbove(compoundPath);
+                 parts.push(part);
+             }
+@@ -58,7 +63,7 @@
+                     resolvedHoles.push(hole);
+                 }
+                 if(cmp) {
+-                    cmp.fillColor = compoundPath.fillColor;
++                    cmp.fillColor = compoundPath.fillColor; cmp.data = Object.assign({}, compoundPath.data);
+                     cmp.insertAbove(part);
+                     part.remove();
+                 }
+@@ -69,7 +74,7 @@
+         holes.filter(hole => {
+             return resolvedHoles.indexOf(hole) === -1;
+         }).forEach(hole => {
+-            hole.clockwise = !hole.clockwise;
++            hole.clockwise = !hole.clockwise; hole.data = Object.assign({}, compoundPath.data);
+             paper.project.activeLayer.addChild(hole);
+         });
+ 
+@@ -85,12 +90,12 @@
+         res.fillColor = path.fillColor;
+         if(res.children) {
+             res.insertAbove(path);
+-            res.data = {};
++            res.data = artOnly(path);
+             path.remove();
+             splitCompoundPath(res);
+         } else {
+             if(res.segments.length > 0) {
+-                res.data = {};
++                res.data = artOnly(path);
+                 res.insertAbove(path);
+             }
+             path.remove();
+@@ -107,7 +112,7 @@
+             // Since the path is only strokes, it's trivial to split it into individual paths
+             var children = [];
+             res.children.forEach(function (child) {
+-                child.data = {};
++                child.data = artOnly(path);
+                 children.push(child);
+                 child.name = null;
+             });
+@@ -117,8 +122,7 @@
+             res.remove();
+         } else {
+             res.remove();
+-            if(res.segments.length > 0)
+-                res.insertAbove(path);
++            { if (res.segments.length > 0) { res.data = artOnly(path); res.insertAbove(path); } }
+         }
+         path.remove();
+     }
+@@ -150,7 +154,7 @@
+         });
+ 
+         var touchingPaths = this.children.filter(function (child) {
+-            return eraserPath.bounds.intersects(child.bounds);
++            return child.visible !== false && eraserPath.bounds.intersects(child.bounds);
+         });
+         touchingPaths.forEach(path => {
+             if(path.strokeColor && path.fillColor) {
 diff --git a/package.json b/package.json
 index 46a1e31..2c2aaf0 100644
 --- a/package.json
@@ -112,6 +869,1517 @@ index 8a95456..fe60cc2 100644
      <!--
        manifest.json provides metadata used when your web app is added to the
        homescreen on Android. See https://developers.google.com/web/fundamentals/web-app-manifest/
+diff --git a/public/sounds/README.md b/public/sounds/README.md
+new file mode 100644
+index 0000000..42281ef
+--- /dev/null
++++ b/public/sounds/README.md
+@@ -0,0 +1,13 @@
++# Sound library
++
++Sounds for the Sounds tab of the Builtin Library (the + button in the Asset Library).
++
++- **Memes** are meme sounds the site owner added from his own collection. They are not CC0.
++- **Whooshes & Hits**, **Drums & Music** and **Robots & Glitch** come from the Sonic Pi sample library (via Adafruit's Sound Samples), all CC0 from Freesound.org.
++- **Everyday** comes from Adafruit's Sound Samples ("sounds of adafruit"), CC0, plus a few Sonic Pi samples.
++- **Interface** is from Kenney's Interface Sounds (kenney.nl), CC0.
++- **Game Blips** are the sounds that ship with the Wick Editor. Each is CC0 from Freesound.org; the credit and link for each one are in `catalog.json`.
++
++A sound pack you bought for your own use usually can't be posted here; check its license first.
++
++To add a sound: put the `.mp3` in a category folder and add an entry to `catalog.json` (`category`, `name`, `file`, `seconds`, `credit`, `license`).
+diff --git a/public/sounds/catalog.json b/public/sounds/catalog.json
+new file mode 100644
+index 0000000..c11d425
+--- /dev/null
++++ b/public/sounds/catalog.json
+@@ -0,0 +1,1485 @@
++{
++ "categories": [
++  "Memes",
++  "Whooshes & Hits",
++  "Everyday",
++  "Drums & Music",
++  "Robots & Glitch",
++  "Interface",
++  "Game Blips"
++ ],
++ "sounds": [
++  {
++   "category": "Memes",
++   "name": "2000 Years Later",
++   "file": "memes/2000-years-later.mp3",
++   "seconds": 3.6,
++   "credit": "Meme sound",
++   "license": "Added by the teacher"
++  },
++  {
++   "category": "Memes",
++   "name": "67",
++   "file": "memes/67.mp3",
++   "seconds": 1.0,
++   "credit": "Meme sound",
++   "license": "Added by the teacher"
++  },
++  {
++   "category": "Memes",
++   "name": "Ack",
++   "file": "memes/ack.mp3",
++   "seconds": 5.0,
++   "credit": "Meme sound",
++   "license": "Added by the teacher"
++  },
++  {
++   "category": "Memes",
++   "name": "Applause",
++   "file": "memes/applause.mp3",
++   "seconds": 7.1,
++   "credit": "Meme sound",
++   "license": "Added by the teacher"
++  },
++  {
++   "category": "Memes",
++   "name": "Are You Out of Your Mind",
++   "file": "memes/are-you-out-of-your-mind.mp3",
++   "seconds": 3.0,
++   "credit": "Meme sound",
++   "license": "Added by the teacher"
++  },
++  {
++   "category": "Memes",
++   "name": "Aura",
++   "file": "memes/aura.mp3",
++   "seconds": 12.9,
++   "credit": "Meme sound",
++   "license": "Added by the teacher"
++  },
++  {
++   "category": "Memes",
++   "name": "Baby Boo",
++   "file": "memes/baby-boo.mp3",
++   "seconds": 2.4,
++   "credit": "Meme sound",
++   "license": "Added by the teacher"
++  },
++  {
++   "category": "Memes",
++   "name": "Baby Laugh",
++   "file": "memes/baby-laugh.mp3",
++   "seconds": 6.6,
++   "credit": "Meme sound",
++   "license": "Added by the teacher"
++  },
++  {
++   "category": "Memes",
++   "name": "Bo Womp",
++   "file": "memes/bo-womp.mp3",
++   "seconds": 1.0,
++   "credit": "Meme sound",
++   "license": "Added by the teacher"
++  },
++  {
++   "category": "Memes",
++   "name": "Bombastic Side Eye",
++   "file": "memes/bombastic-side-eye.mp3",
++   "seconds": 6.4,
++   "credit": "Meme sound",
++   "license": "Added by the teacher"
++  },
++  {
++   "category": "Memes",
++   "name": "Bone Crack",
++   "file": "memes/bone-crack.mp3",
++   "seconds": 1.1,
++   "credit": "Meme sound",
++   "license": "Added by the teacher"
++  },
++  {
++   "category": "Memes",
++   "name": "Bruh",
++   "file": "memes/bruh.mp3",
++   "seconds": 0.9,
++   "credit": "Meme sound",
++   "license": "Added by the teacher"
++  },
++  {
++   "category": "Memes",
++   "name": "Buzzer",
++   "file": "memes/buzzer.mp3",
++   "seconds": 1.2,
++   "credit": "Meme sound",
++   "license": "Added by the teacher"
++  },
++  {
++   "category": "Memes",
++   "name": "Cat Laugh",
++   "file": "memes/cat-laugh.mp3",
++   "seconds": 3.6,
++   "credit": "Meme sound",
++   "license": "Added by the teacher"
++  },
++  {
++   "category": "Memes",
++   "name": "Crickets",
++   "file": "memes/crickets.mp3",
++   "seconds": 5.4,
++   "credit": "Meme sound",
++   "license": "Added by the teacher"
++  },
++  {
++   "category": "Memes",
++   "name": "Crowd Gasp",
++   "file": "memes/crowd-gasp.mp3",
++   "seconds": 1.1,
++   "credit": "Meme sound",
++   "license": "Added by the teacher"
++  },
++  {
++   "category": "Memes",
++   "name": "Dexter",
++   "file": "memes/dexter.mp3",
++   "seconds": 10.7,
++   "credit": "Meme sound",
++   "license": "Added by the teacher"
++  },
++  {
++   "category": "Memes",
++   "name": "Didn't Have To",
++   "file": "memes/didn-t-have-to.mp3",
++   "seconds": 19.0,
++   "credit": "Meme sound",
++   "license": "Added by the teacher"
++  },
++  {
++   "category": "Memes",
++   "name": "Discord Notification",
++   "file": "memes/discord-notification.mp3",
++   "seconds": 0.5,
++   "credit": "Meme sound",
++   "license": "Added by the teacher"
++  },
++  {
++   "category": "Memes",
++   "name": "Elevator Music",
++   "file": "memes/elevator-music.mp3",
++   "seconds": 10.7,
++   "credit": "Meme sound",
++   "license": "Added by the teacher"
++  },
++  {
++   "category": "Memes",
++   "name": "Error",
++   "file": "memes/error.mp3",
++   "seconds": 1.0,
++   "credit": "Meme sound",
++   "license": "Added by the teacher"
++  },
++  {
++   "category": "Memes",
++   "name": "Get Out",
++   "file": "memes/get-out.mp3",
++   "seconds": 1.0,
++   "credit": "Meme sound",
++   "license": "Added by the teacher"
++  },
++  {
++   "category": "Memes",
++   "name": "Goku Drip",
++   "file": "memes/goku-drip.mp3",
++   "seconds": 4.9,
++   "credit": "Meme sound",
++   "license": "Added by the teacher"
++  },
++  {
++   "category": "Memes",
++   "name": "Happy Happy Happy",
++   "file": "memes/happy-happy-happy.mp3",
++   "seconds": 7.5,
++   "credit": "Meme sound",
++   "license": "Added by the teacher"
++  },
++  {
++   "category": "Memes",
++   "name": "Helicopter Helicopter",
++   "file": "memes/helicopter-helicopter.mp3",
++   "seconds": 10.1,
++   "credit": "Meme sound",
++   "license": "Added by the teacher"
++  },
++  {
++   "category": "Memes",
++   "name": "Huh?",
++   "file": "memes/huh.mp3",
++   "seconds": 0.3,
++   "credit": "Meme sound",
++   "license": "Added by the teacher"
++  },
++  {
++   "category": "Memes",
++   "name": "iPhone Notification",
++   "file": "memes/iphone-notification.mp3",
++   "seconds": 4.7,
++   "credit": "Meme sound",
++   "license": "Added by the teacher"
++  },
++  {
++   "category": "Memes",
++   "name": "JJK Battle",
++   "file": "memes/jjk-battle.mp3",
++   "seconds": 18.1,
++   "credit": "Meme sound",
++   "license": "Added by the teacher"
++  },
++  {
++   "category": "Memes",
++   "name": "Lightsaber On",
++   "file": "memes/lightsaber-on.mp3",
++   "seconds": 2.8,
++   "credit": "Meme sound",
++   "license": "Added by the teacher"
++  },
++  {
++   "category": "Memes",
++   "name": "Lizard",
++   "file": "memes/lizard.mp3",
++   "seconds": 1.0,
++   "credit": "Meme sound",
++   "license": "Added by the teacher"
++  },
++  {
++   "category": "Memes",
++   "name": "Lizard Repeat",
++   "file": "memes/lizard-repeat.mp3",
++   "seconds": 10.3,
++   "credit": "Meme sound",
++   "license": "Added by the teacher"
++  },
++  {
++   "category": "Memes",
++   "name": "Mario Coin",
++   "file": "memes/mario-coin.mp3",
++   "seconds": 2.0,
++   "credit": "Meme sound",
++   "license": "Added by the teacher"
++  },
++  {
++   "category": "Memes",
++   "name": "Minecraft Eating",
++   "file": "memes/minecraft-eating.mp3",
++   "seconds": 1.7,
++   "credit": "Meme sound",
++   "license": "Added by the teacher"
++  },
++  {
++   "category": "Memes",
++   "name": "Minecraft Hurt",
++   "file": "memes/minecraft-hurt.mp3",
++   "seconds": 0.4,
++   "credit": "Meme sound",
++   "license": "Added by the teacher"
++  },
++  {
++   "category": "Memes",
++   "name": "Mouse Click",
++   "file": "memes/mouse-click.mp3",
++   "seconds": 1.5,
++   "credit": "Meme sound",
++   "license": "Added by the teacher"
++  },
++  {
++   "category": "Memes",
++   "name": "Moving Stone",
++   "file": "memes/moving-stone.mp3",
++   "seconds": 1.8,
++   "credit": "Meme sound",
++   "license": "Added by the teacher"
++  },
++  {
++   "category": "Memes",
++   "name": "Mr Krabs Walking",
++   "file": "memes/mr-krabs-walking.mp3",
++   "seconds": 2.1,
++   "credit": "Meme sound",
++   "license": "Added by the teacher"
++  },
++  {
++   "category": "Memes",
++   "name": "Oh My God",
++   "file": "memes/oh-my-god.mp3",
++   "seconds": 1.7,
++   "credit": "Meme sound",
++   "license": "Added by the teacher"
++  },
++  {
++   "category": "Memes",
++   "name": "OIIA OIIA",
++   "file": "memes/oiia-oiia.mp3",
++   "seconds": 5.7,
++   "credit": "Meme sound",
++   "license": "Added by the teacher"
++  },
++  {
++   "category": "Memes",
++   "name": "Price Is Wrong",
++   "file": "memes/price-is-wrong.mp3",
++   "seconds": 5.1,
++   "credit": "Meme sound",
++   "license": "Added by the teacher"
++  },
++  {
++   "category": "Memes",
++   "name": "Rizz",
++   "file": "memes/rizz.mp3",
++   "seconds": 1.9,
++   "credit": "Meme sound",
++   "license": "Added by the teacher"
++  },
++  {
++   "category": "Memes",
++   "name": "Rizzbot Laugh",
++   "file": "memes/rizzbot-laugh.mp3",
++   "seconds": 2.4,
++   "credit": "Meme sound",
++   "license": "Added by the teacher"
++  },
++  {
++   "category": "Memes",
++   "name": "Romance",
++   "file": "memes/romance.mp3",
++   "seconds": 5.9,
++   "credit": "Meme sound",
++   "license": "Added by the teacher"
++  },
++  {
++   "category": "Memes",
++   "name": "Run!",
++   "file": "memes/run.mp3",
++   "seconds": 8.3,
++   "credit": "Meme sound",
++   "license": "Added by the teacher"
++  },
++  {
++   "category": "Memes",
++   "name": "Sad Meow Song",
++   "file": "memes/sad-meow-song.mp3",
++   "seconds": 25.1,
++   "credit": "Meme sound",
++   "license": "Added by the teacher"
++  },
++  {
++   "category": "Memes",
++   "name": "Screaming Tree Chicken",
++   "file": "memes/screaming-tree-chicken.mp3",
++   "seconds": 5.7,
++   "credit": "Meme sound",
++   "license": "Added by the teacher"
++  },
++  {
++   "category": "Memes",
++   "name": "Snore (Mimimimi)",
++   "file": "memes/snore-mimimimi.mp3",
++   "seconds": 5.7,
++   "credit": "Meme sound",
++   "license": "Added by the teacher"
++  },
++  {
++   "category": "Memes",
++   "name": "Sponge Stank",
++   "file": "memes/sponge-stank.mp3",
++   "seconds": 2.7,
++   "credit": "Meme sound",
++   "license": "Added by the teacher"
++  },
++  {
++   "category": "Memes",
++   "name": "SpongeBob Fail",
++   "file": "memes/spongebob-fail.mp3",
++   "seconds": 3.4,
++   "credit": "Meme sound",
++   "license": "Added by the teacher"
++  },
++  {
++   "category": "Memes",
++   "name": "SpongeBob Walking",
++   "file": "memes/spongebob-walking.mp3",
++   "seconds": 5.7,
++   "credit": "Meme sound",
++   "license": "Added by the teacher"
++  },
++  {
++   "category": "Memes",
++   "name": "Squidward Walking",
++   "file": "memes/squidward-walking.mp3",
++   "seconds": 3.5,
++   "credit": "Meme sound",
++   "license": "Added by the teacher"
++  },
++  {
++   "category": "Memes",
++   "name": "Super Mario Lose",
++   "file": "memes/super-mario-lose.mp3",
++   "seconds": 9.9,
++   "credit": "Meme sound",
++   "license": "Added by the teacher"
++  },
++  {
++   "category": "Memes",
++   "name": "Taco Bell",
++   "file": "memes/taco-bell.mp3",
++   "seconds": 2.0,
++   "credit": "Meme sound",
++   "license": "Added by the teacher"
++  },
++  {
++   "category": "Memes",
++   "name": "The Undertaker",
++   "file": "memes/the-undertaker.mp3",
++   "seconds": 4.2,
++   "credit": "Meme sound",
++   "license": "Added by the teacher"
++  },
++  {
++   "category": "Memes",
++   "name": "Vine Boom",
++   "file": "memes/vine-boom.mp3",
++   "seconds": 1.3,
++   "credit": "Meme sound",
++   "license": "Added by the teacher"
++  },
++  {
++   "category": "Memes",
++   "name": "Vine Boom (Bass)",
++   "file": "memes/vine-boom-bass.mp3",
++   "seconds": 3.5,
++   "credit": "Meme sound",
++   "license": "Added by the teacher"
++  },
++  {
++   "category": "Memes",
++   "name": "Vine Boom (Longer)",
++   "file": "memes/vine-boom-longer.mp3",
++   "seconds": 3.1,
++   "credit": "Meme sound",
++   "license": "Added by the teacher"
++  },
++  {
++   "category": "Memes",
++   "name": "Weave",
++   "file": "memes/weave.mp3",
++   "seconds": 0.6,
++   "credit": "Meme sound",
++   "license": "Added by the teacher"
++  },
++  {
++   "category": "Memes",
++   "name": "What Bottom Text",
++   "file": "memes/what-bottom-text.mp3",
++   "seconds": 9.0,
++   "credit": "Meme sound",
++   "license": "Added by the teacher"
++  },
++  {
++   "category": "Memes",
++   "name": "Windows XP Shutdown",
++   "file": "memes/windows-xp-shutdown.mp3",
++   "seconds": 3.3,
++   "credit": "Meme sound",
++   "license": "Added by the teacher"
++  },
++  {
++   "category": "Memes",
++   "name": "Wow",
++   "file": "memes/wow.mp3",
++   "seconds": 4.2,
++   "credit": "Meme sound",
++   "license": "Added by the teacher"
++  },
++  {
++   "category": "Memes",
++   "name": "Yaaay",
++   "file": "memes/yaaay.mp3",
++   "seconds": 8.2,
++   "credit": "Meme sound",
++   "license": "Added by the teacher"
++  },
++  {
++   "category": "Memes",
++   "name": "Yoshi Tongue",
++   "file": "memes/yoshi-tongue.mp3",
++   "seconds": 0.2,
++   "credit": "Meme sound",
++   "license": "Added by the teacher"
++  },
++  {
++   "category": "Whooshes & Hits",
++   "name": "Swoosh",
++   "file": "whooshes-hits/swoosh.mp3",
++   "seconds": 0.7,
++   "credit": "Sonic Pi sample library (from Freesound.org)",
++   "license": "CC0"
++  },
++  {
++   "category": "Whooshes & Hits",
++   "name": "Swish",
++   "file": "whooshes-hits/swish.mp3",
++   "seconds": 0.4,
++   "credit": "Sonic Pi sample library (from Freesound.org)",
++   "license": "CC0"
++  },
++  {
++   "category": "Whooshes & Hits",
++   "name": "Soft Swoosh",
++   "file": "whooshes-hits/soft-swoosh.mp3",
++   "seconds": 1.9,
++   "credit": "Sonic Pi sample library (from Freesound.org)",
++   "license": "CC0"
++  },
++  {
++   "category": "Whooshes & Hits",
++   "name": "Dark Whoosh",
++   "file": "whooshes-hits/dark-whoosh.mp3",
++   "seconds": 3.7,
++   "credit": "Sonic Pi sample library (from Freesound.org)",
++   "license": "CC0"
++  },
++  {
++   "category": "Whooshes & Hits",
++   "name": "Impact",
++   "file": "whooshes-hits/impact.mp3",
++   "seconds": 1.1,
++   "credit": "Sonic Pi sample library (from Freesound.org)",
++   "license": "CC0"
++  },
++  {
++   "category": "Whooshes & Hits",
++   "name": "Heavy Impact",
++   "file": "whooshes-hits/heavy-impact.mp3",
++   "seconds": 0.9,
++   "credit": "Sonic Pi sample library (from Freesound.org)",
++   "license": "CC0"
++  },
++  {
++   "category": "Whooshes & Hits",
++   "name": "Movie Boom",
++   "file": "whooshes-hits/movie-boom.mp3",
++   "seconds": 8.0,
++   "credit": "Sonic Pi sample library (from Freesound.org)",
++   "license": "CC0"
++  },
++  {
++   "category": "Whooshes & Hits",
++   "name": "Boom",
++   "file": "whooshes-hits/boom.mp3",
++   "seconds": 1.8,
++   "credit": "Sonic Pi sample library (from Freesound.org)",
++   "license": "CC0"
++  },
++  {
++   "category": "Whooshes & Hits",
++   "name": "Snap",
++   "file": "whooshes-hits/snap.mp3",
++   "seconds": 0.3,
++   "credit": "Sonic Pi sample library (from Freesound.org)",
++   "license": "CC0"
++  },
++  {
++   "category": "Whooshes & Hits",
++   "name": "Finger Snap",
++   "file": "whooshes-hits/finger-snap.mp3",
++   "seconds": 0.2,
++   "credit": "Sonic Pi sample library (from Freesound.org)",
++   "license": "CC0"
++  },
++  {
++   "category": "Whooshes & Hits",
++   "name": "Bass Drop",
++   "file": "whooshes-hits/bass-drop.mp3",
++   "seconds": 2.4,
++   "credit": "Sonic Pi sample library (from Freesound.org)",
++   "license": "CC0"
++  },
++  {
++   "category": "Whooshes & Hits",
++   "name": "Rewind",
++   "file": "whooshes-hits/rewind.mp3",
++   "seconds": 2.7,
++   "credit": "Sonic Pi sample library (from Freesound.org)",
++   "license": "CC0"
++  },
++  {
++   "category": "Whooshes & Hits",
++   "name": "Record Backspin",
++   "file": "whooshes-hits/record-backspin.mp3",
++   "seconds": 1.1,
++   "credit": "Sonic Pi sample library (from Freesound.org)",
++   "license": "CC0"
++  },
++  {
++   "category": "Whooshes & Hits",
++   "name": "Record Scratch",
++   "file": "whooshes-hits/record-scratch.mp3",
++   "seconds": 0.3,
++   "credit": "Sonic Pi sample library (from Freesound.org)",
++   "license": "CC0"
++  },
++  {
++   "category": "Everyday",
++   "name": "Door",
++   "file": "everyday/door.mp3",
++   "seconds": 0.7,
++   "credit": "Adafruit Sound Samples",
++   "license": "CC0"
++  },
++  {
++   "category": "Everyday",
++   "name": "Door Close",
++   "file": "everyday/door-close.mp3",
++   "seconds": 1.2,
++   "credit": "Adafruit Sound Samples",
++   "license": "CC0"
++  },
++  {
++   "category": "Everyday",
++   "name": "Creaky Door",
++   "file": "everyday/creaky-door.mp3",
++   "seconds": 2.5,
++   "credit": "Sonic Pi sample library (from Freesound.org)",
++   "license": "CC0"
++  },
++  {
++   "category": "Everyday",
++   "name": "Drawer Open",
++   "file": "everyday/drawer-open.mp3",
++   "seconds": 1.1,
++   "credit": "Adafruit Sound Samples",
++   "license": "CC0"
++  },
++  {
++   "category": "Everyday",
++   "name": "Drawer Roll",
++   "file": "everyday/drawer-roll.mp3",
++   "seconds": 1.5,
++   "credit": "Adafruit Sound Samples",
++   "license": "CC0"
++  },
++  {
++   "category": "Everyday",
++   "name": "Cardboard Cut",
++   "file": "everyday/cardboard-cut.mp3",
++   "seconds": 1.3,
++   "credit": "Adafruit Sound Samples",
++   "license": "CC0"
++  },
++  {
++   "category": "Everyday",
++   "name": "Bubble Wrap Rustle",
++   "file": "everyday/bubble-wrap-rustle.mp3",
++   "seconds": 0.9,
++   "credit": "Adafruit Sound Samples",
++   "license": "CC0"
++  },
++  {
++   "category": "Everyday",
++   "name": "Printer",
++   "file": "everyday/printer.mp3",
++   "seconds": 1.5,
++   "credit": "Adafruit Sound Samples",
++   "license": "CC0"
++  },
++  {
++   "category": "Everyday",
++   "name": "Box Drop",
++   "file": "everyday/box-drop.mp3",
++   "seconds": 0.5,
++   "credit": "Adafruit Sound Samples",
++   "license": "CC0"
++  },
++  {
++   "category": "Everyday",
++   "name": "Elevator",
++   "file": "everyday/elevator.mp3",
++   "seconds": 2.1,
++   "credit": "Adafruit Sound Samples",
++   "license": "CC0"
++  },
++  {
++   "category": "Everyday",
++   "name": "Subway",
++   "file": "everyday/subway.mp3",
++   "seconds": 1.9,
++   "credit": "Adafruit Sound Samples",
++   "license": "CC0"
++  },
++  {
++   "category": "Everyday",
++   "name": "Radiator Clank",
++   "file": "everyday/radiator-clank.mp3",
++   "seconds": 1.2,
++   "credit": "Adafruit Sound Samples",
++   "license": "CC0"
++  },
++  {
++   "category": "Everyday",
++   "name": "Steam Hiss",
++   "file": "everyday/steam-hiss.mp3",
++   "seconds": 3.1,
++   "credit": "Adafruit Sound Samples",
++   "license": "CC0"
++  },
++  {
++   "category": "Everyday",
++   "name": "Bell",
++   "file": "everyday/bell.mp3",
++   "seconds": 0.8,
++   "credit": "Adafruit Sound Samples",
++   "license": "CC0"
++  },
++  {
++   "category": "Everyday",
++   "name": "Bell Roll",
++   "file": "everyday/bell-roll.mp3",
++   "seconds": 1.7,
++   "credit": "Adafruit Sound Samples",
++   "license": "CC0"
++  },
++  {
++   "category": "Everyday",
++   "name": "Chime",
++   "file": "everyday/chime.mp3",
++   "seconds": 0.7,
++   "credit": "Adafruit Sound Samples",
++   "license": "CC0"
++  },
++  {
++   "category": "Everyday",
++   "name": "Snap",
++   "file": "everyday/snap.mp3",
++   "seconds": 0.2,
++   "credit": "Adafruit Sound Samples",
++   "license": "CC0"
++  },
++  {
++   "category": "Everyday",
++   "name": "Sleigh Bells",
++   "file": "everyday/sleigh-bells.mp3",
++   "seconds": 1.0,
++   "credit": "Adafruit Sound Samples",
++   "license": "CC0"
++  },
++  {
++   "category": "Everyday",
++   "name": "Cash Register",
++   "file": "everyday/cash-register.mp3",
++   "seconds": 2.7,
++   "credit": "Sonic Pi sample library (from Freesound.org)",
++   "license": "CC0"
++  },
++  {
++   "category": "Everyday",
++   "name": "Crow",
++   "file": "everyday/crow.mp3",
++   "seconds": 0.5,
++   "credit": "Sonic Pi sample library (from Freesound.org)",
++   "license": "CC0"
++  },
++  {
++   "category": "Everyday",
++   "name": "Burp",
++   "file": "everyday/burp.mp3",
++   "seconds": 0.8,
++   "credit": "Sonic Pi sample library (from Freesound.org)",
++   "license": "CC0"
++  },
++  {
++   "category": "Everyday",
++   "name": "Phone 1",
++   "file": "everyday/phone-1.mp3",
++   "seconds": 1.3,
++   "credit": "Sonic Pi sample library (from Freesound.org)",
++   "license": "CC0"
++  },
++  {
++   "category": "Everyday",
++   "name": "Phone 2",
++   "file": "everyday/phone-2.mp3",
++   "seconds": 1.3,
++   "credit": "Sonic Pi sample library (from Freesound.org)",
++   "license": "CC0"
++  },
++  {
++   "category": "Drums & Music",
++   "name": "Drum Roll",
++   "file": "drums-music/drum-roll.mp3",
++   "seconds": 6.3,
++   "credit": "Sonic Pi sample library (from Freesound.org)",
++   "license": "CC0"
++  },
++  {
++   "category": "Drums & Music",
++   "name": "Cymbal Crash",
++   "file": "drums-music/cymbal-crash.mp3",
++   "seconds": 1.7,
++   "credit": "Sonic Pi sample library (from Freesound.org)",
++   "license": "CC0"
++  },
++  {
++   "category": "Drums & Music",
++   "name": "Splash Cymbal",
++   "file": "drums-music/splash-cymbal.mp3",
++   "seconds": 2.6,
++   "credit": "Sonic Pi sample library (from Freesound.org)",
++   "license": "CC0"
++  },
++  {
++   "category": "Drums & Music",
++   "name": "Kick Drum",
++   "file": "drums-music/kick-drum.mp3",
++   "seconds": 0.3,
++   "credit": "Sonic Pi sample library (from Freesound.org)",
++   "license": "CC0"
++  },
++  {
++   "category": "Drums & Music",
++   "name": "Snare",
++   "file": "drums-music/snare.mp3",
++   "seconds": 0.5,
++   "credit": "Sonic Pi sample library (from Freesound.org)",
++   "license": "CC0"
++  },
++  {
++   "category": "Drums & Music",
++   "name": "High Tom",
++   "file": "drums-music/high-tom.mp3",
++   "seconds": 0.8,
++   "credit": "Sonic Pi sample library (from Freesound.org)",
++   "license": "CC0"
++  },
++  {
++   "category": "Drums & Music",
++   "name": "Low Tom",
++   "file": "drums-music/low-tom.mp3",
++   "seconds": 1.0,
++   "credit": "Sonic Pi sample library (from Freesound.org)",
++   "license": "CC0"
++  },
++  {
++   "category": "Drums & Music",
++   "name": "Cowbell",
++   "file": "drums-music/cowbell.mp3",
++   "seconds": 0.4,
++   "credit": "Sonic Pi sample library (from Freesound.org)",
++   "license": "CC0"
++  },
++  {
++   "category": "Drums & Music",
++   "name": "Bell Hit",
++   "file": "drums-music/bell-hit.mp3",
++   "seconds": 6.8,
++   "credit": "Sonic Pi sample library (from Freesound.org)",
++   "license": "CC0"
++  },
++  {
++   "category": "Drums & Music",
++   "name": "Guitar Slide",
++   "file": "drums-music/guitar-slide.mp3",
++   "seconds": 4.4,
++   "credit": "Sonic Pi sample library (from Freesound.org)",
++   "license": "CC0"
++  },
++  {
++   "category": "Drums & Music",
++   "name": "Guitar Harmonics",
++   "file": "drums-music/guitar-harmonics.mp3",
++   "seconds": 3.6,
++   "credit": "Sonic Pi sample library (from Freesound.org)",
++   "license": "CC0"
++  },
++  {
++   "category": "Drums & Music",
++   "name": "Choir",
++   "file": "drums-music/choir.mp3",
++   "seconds": 1.6,
++   "credit": "Sonic Pi sample library (from Freesound.org)",
++   "license": "CC0"
++  },
++  {
++   "category": "Drums & Music",
++   "name": "Piano",
++   "file": "drums-music/piano.mp3",
++   "seconds": 2.8,
++   "credit": "Sonic Pi sample library (from Freesound.org)",
++   "license": "CC0"
++  },
++  {
++   "category": "Drums & Music",
++   "name": "Drum Loop",
++   "file": "drums-music/drum-loop.mp3",
++   "seconds": 1.8,
++   "credit": "Sonic Pi sample library (from Freesound.org)",
++   "license": "CC0"
++  },
++  {
++   "category": "Drums & Music",
++   "name": "Safari Loop",
++   "file": "drums-music/safari-loop.mp3",
++   "seconds": 8.0,
++   "credit": "Sonic Pi sample library (from Freesound.org)",
++   "license": "CC0"
++  },
++  {
++   "category": "Drums & Music",
++   "name": "Tabla Loop",
++   "file": "drums-music/tabla-loop.mp3",
++   "seconds": 10.7,
++   "credit": "Sonic Pi sample library (from Freesound.org)",
++   "license": "CC0"
++  },
++  {
++   "category": "Drums & Music",
++   "name": "Tabla Hit",
++   "file": "drums-music/tabla-hit.mp3",
++   "seconds": 0.8,
++   "credit": "Sonic Pi sample library (from Freesound.org)",
++   "license": "CC0"
++  },
++  {
++   "category": "Robots & Glitch",
++   "name": "Robot 1",
++   "file": "robots-glitch/robot-1.mp3",
++   "seconds": 1.0,
++   "credit": "Sonic Pi sample library (from Freesound.org)",
++   "license": "CC0"
++  },
++  {
++   "category": "Robots & Glitch",
++   "name": "Robot 2",
++   "file": "robots-glitch/robot-2.mp3",
++   "seconds": 1.1,
++   "credit": "Sonic Pi sample library (from Freesound.org)",
++   "license": "CC0"
++  },
++  {
++   "category": "Robots & Glitch",
++   "name": "Robot 3",
++   "file": "robots-glitch/robot-3.mp3",
++   "seconds": 1.3,
++   "credit": "Sonic Pi sample library (from Freesound.org)",
++   "license": "CC0"
++  },
++  {
++   "category": "Robots & Glitch",
++   "name": "Robot 4",
++   "file": "robots-glitch/robot-4.mp3",
++   "seconds": 2.0,
++   "credit": "Sonic Pi sample library (from Freesound.org)",
++   "license": "CC0"
++  },
++  {
++   "category": "Robots & Glitch",
++   "name": "Robot 5",
++   "file": "robots-glitch/robot-5.mp3",
++   "seconds": 1.5,
++   "credit": "Sonic Pi sample library (from Freesound.org)",
++   "license": "CC0"
++  },
++  {
++   "category": "Robots & Glitch",
++   "name": "Robot 6",
++   "file": "robots-glitch/robot-6.mp3",
++   "seconds": 2.5,
++   "credit": "Sonic Pi sample library (from Freesound.org)",
++   "license": "CC0"
++  },
++  {
++   "category": "Robots & Glitch",
++   "name": "Robot 7",
++   "file": "robots-glitch/robot-7.mp3",
++   "seconds": 0.5,
++   "credit": "Sonic Pi sample library (from Freesound.org)",
++   "license": "CC0"
++  },
++  {
++   "category": "Robots & Glitch",
++   "name": "Glitch Robot 1",
++   "file": "robots-glitch/glitch-robot-1.mp3",
++   "seconds": 1.1,
++   "credit": "Sonic Pi sample library (from Freesound.org)",
++   "license": "CC0"
++  },
++  {
++   "category": "Robots & Glitch",
++   "name": "Glitch Robot 2",
++   "file": "robots-glitch/glitch-robot-2.mp3",
++   "seconds": 1.0,
++   "credit": "Sonic Pi sample library (from Freesound.org)",
++   "license": "CC0"
++  },
++  {
++   "category": "Robots & Glitch",
++   "name": "Twang",
++   "file": "robots-glitch/twang.mp3",
++   "seconds": 0.7,
++   "credit": "Sonic Pi sample library (from Freesound.org)",
++   "license": "CC0"
++  },
++  {
++   "category": "Robots & Glitch",
++   "name": "Ping",
++   "file": "robots-glitch/ping.mp3",
++   "seconds": 0.3,
++   "credit": "Sonic Pi sample library (from Freesound.org)",
++   "license": "CC0"
++  },
++  {
++   "category": "Robots & Glitch",
++   "name": "Blip",
++   "file": "robots-glitch/blip.mp3",
++   "seconds": 0.2,
++   "credit": "Sonic Pi sample library (from Freesound.org)",
++   "license": "CC0"
++  },
++  {
++   "category": "Robots & Glitch",
++   "name": "Pop",
++   "file": "robots-glitch/pop.mp3",
++   "seconds": 0.1,
++   "credit": "Sonic Pi sample library (from Freesound.org)",
++   "license": "CC0"
++  },
++  {
++   "category": "Robots & Glitch",
++   "name": "Bong",
++   "file": "robots-glitch/bong.mp3",
++   "seconds": 0.4,
++   "credit": "Sonic Pi sample library (from Freesound.org)",
++   "license": "CC0"
++  },
++  {
++   "category": "Robots & Glitch",
++   "name": "Electric Chime",
++   "file": "robots-glitch/electric-chime.mp3",
++   "seconds": 2.3,
++   "credit": "Sonic Pi sample library (from Freesound.org)",
++   "license": "CC0"
++  },
++  {
++   "category": "Robots & Glitch",
++   "name": "Lunar Landing",
++   "file": "robots-glitch/lunar-landing.mp3",
++   "seconds": 7.4,
++   "credit": "Sonic Pi sample library (from Freesound.org)",
++   "license": "CC0"
++  },
++  {
++   "category": "Interface",
++   "name": "Click 1",
++   "file": "interface/click-1.mp3",
++   "seconds": 0.2,
++   "credit": "Kenney (kenney.nl), Interface Sounds",
++   "license": "CC0"
++  },
++  {
++   "category": "Interface",
++   "name": "Click 2",
++   "file": "interface/click-2.mp3",
++   "seconds": 0.1,
++   "credit": "Kenney (kenney.nl), Interface Sounds",
++   "license": "CC0"
++  },
++  {
++   "category": "Interface",
++   "name": "Confirm 1",
++   "file": "interface/confirm-1.mp3",
++   "seconds": 0.3,
++   "credit": "Kenney (kenney.nl), Interface Sounds",
++   "license": "CC0"
++  },
++  {
++   "category": "Interface",
++   "name": "Confirm 2",
++   "file": "interface/confirm-2.mp3",
++   "seconds": 0.6,
++   "credit": "Kenney (kenney.nl), Interface Sounds",
++   "license": "CC0"
++  },
++  {
++   "category": "Interface",
++   "name": "Error 1",
++   "file": "interface/error-1.mp3",
++   "seconds": 0.2,
++   "credit": "Kenney (kenney.nl), Interface Sounds",
++   "license": "CC0"
++  },
++  {
++   "category": "Interface",
++   "name": "Error 2",
++   "file": "interface/error-2.mp3",
++   "seconds": 0.1,
++   "credit": "Kenney (kenney.nl), Interface Sounds",
++   "license": "CC0"
++  },
++  {
++   "category": "Interface",
++   "name": "Glass 1",
++   "file": "interface/glass-1.mp3",
++   "seconds": 0.3,
++   "credit": "Kenney (kenney.nl), Interface Sounds",
++   "license": "CC0"
++  },
++  {
++   "category": "Interface",
++   "name": "Glass 2",
++   "file": "interface/glass-2.mp3",
++   "seconds": 0.8,
++   "credit": "Kenney (kenney.nl), Interface Sounds",
++   "license": "CC0"
++  },
++  {
++   "category": "Interface",
++   "name": "Grow",
++   "file": "interface/grow.mp3",
++   "seconds": 0.3,
++   "credit": "Kenney (kenney.nl), Interface Sounds",
++   "license": "CC0"
++  },
++  {
++   "category": "Interface",
++   "name": "Shrink",
++   "file": "interface/shrink.mp3",
++   "seconds": 0.3,
++   "credit": "Kenney (kenney.nl), Interface Sounds",
++   "license": "CC0"
++  },
++  {
++   "category": "Interface",
++   "name": "Open",
++   "file": "interface/open.mp3",
++   "seconds": 0.2,
++   "credit": "Kenney (kenney.nl), Interface Sounds",
++   "license": "CC0"
++  },
++  {
++   "category": "Interface",
++   "name": "Close",
++   "file": "interface/close.mp3",
++   "seconds": 0.2,
++   "credit": "Kenney (kenney.nl), Interface Sounds",
++   "license": "CC0"
++  },
++  {
++   "category": "Interface",
++   "name": "Pluck 1",
++   "file": "interface/pluck-1.mp3",
++   "seconds": 0.2,
++   "credit": "Kenney (kenney.nl), Interface Sounds",
++   "license": "CC0"
++  },
++  {
++   "category": "Interface",
++   "name": "Pluck 2",
++   "file": "interface/pluck-2.mp3",
++   "seconds": 0.2,
++   "credit": "Kenney (kenney.nl), Interface Sounds",
++   "license": "CC0"
++  },
++  {
++   "category": "Interface",
++   "name": "Question",
++   "file": "interface/question.mp3",
++   "seconds": 0.5,
++   "credit": "Kenney (kenney.nl), Interface Sounds",
++   "license": "CC0"
++  },
++  {
++   "category": "Interface",
++   "name": "Scratch",
++   "file": "interface/scratch.mp3",
++   "seconds": 0.2,
++   "credit": "Kenney (kenney.nl), Interface Sounds",
++   "license": "CC0"
++  },
++  {
++   "category": "Interface",
++   "name": "Select",
++   "file": "interface/select.mp3",
++   "seconds": 0.1,
++   "credit": "Kenney (kenney.nl), Interface Sounds",
++   "license": "CC0"
++  },
++  {
++   "category": "Interface",
++   "name": "Switch",
++   "file": "interface/switch.mp3",
++   "seconds": 0.7,
++   "credit": "Kenney (kenney.nl), Interface Sounds",
++   "license": "CC0"
++  },
++  {
++   "category": "Interface",
++   "name": "Tick",
++   "file": "interface/tick.mp3",
++   "seconds": 0.1,
++   "credit": "Kenney (kenney.nl), Interface Sounds",
++   "license": "CC0"
++  },
++  {
++   "category": "Interface",
++   "name": "Toggle",
++   "file": "interface/toggle.mp3",
++   "seconds": 0.2,
++   "credit": "Kenney (kenney.nl), Interface Sounds",
++   "license": "CC0"
++  },
++  {
++   "category": "Interface",
++   "name": "Drop",
++   "file": "interface/drop.mp3",
++   "seconds": 0.2,
++   "credit": "Kenney (kenney.nl), Interface Sounds",
++   "license": "CC0"
++  },
++  {
++   "category": "Interface",
++   "name": "Bong",
++   "file": "interface/bong.mp3",
++   "seconds": 0.2,
++   "credit": "Kenney (kenney.nl), Interface Sounds",
++   "license": "CC0"
++  },
++  {
++   "category": "Interface",
++   "name": "Glitch",
++   "file": "interface/glitch.mp3",
++   "seconds": 0.1,
++   "credit": "Kenney (kenney.nl), Interface Sounds",
++   "license": "CC0"
++  },
++  {
++   "category": "Interface",
++   "name": "Back",
++   "file": "interface/back.mp3",
++   "seconds": 0.1,
++   "credit": "Kenney (kenney.nl), Interface Sounds",
++   "license": "CC0"
++  },
++  {
++   "category": "Game Blips",
++   "name": "Beep 1",
++   "file": "game-blips/beep1.mp3",
++   "seconds": 0.76,
++   "credit": "User pan14 on Freesound.org",
++   "license": "CC0",
++   "link": "https://freesound.org/people/pan14/sounds/263128/"
++  },
++  {
++   "category": "Game Blips",
++   "name": "Beep 2",
++   "file": "game-blips/beep2.mp3",
++   "seconds": 0.34,
++   "credit": "User pan14 on Freesound.org",
++   "license": "CC0",
++   "link": "https://freesound.org/people/pan14/sounds/263126/"
++  },
++  {
++   "category": "Game Blips",
++   "name": "Blip 1",
++   "file": "game-blips/blip1.mp3",
++   "seconds": 0.21,
++   "credit": "User Raclure on Freesound.org",
++   "license": "CC0",
++   "link": "https://freesound.org/people/Raclure/sounds/405546/"
++  },
++  {
++   "category": "Game Blips",
++   "name": "Blip 2",
++   "file": "game-blips/blip2.mp3",
++   "seconds": 0.31,
++   "credit": "User Leszek_Szary on Freesound.org",
++   "license": "CC0",
++   "link": "https://freesound.org/people/Leszek_Szary/sounds/146727/"
++  },
++  {
++   "category": "Game Blips",
++   "name": "Blip 3",
++   "file": "game-blips/blip3.mp3",
++   "seconds": 0.37,
++   "credit": "User pan14 on Freesound.org",
++   "license": "CC0",
++   "link": "https://freesound.org/people/pan14/sounds/263132/"
++  },
++  {
++   "category": "Game Blips",
++   "name": "Blip 4",
++   "file": "game-blips/blip4.mp3",
++   "seconds": 0.42,
++   "credit": "User pan14 on Freesound.org",
++   "license": "CC0",
++   "link": "https://freesound.org/people/pan14/sounds/263124/"
++  },
++  {
++   "category": "Game Blips",
++   "name": "Blip 5",
++   "file": "game-blips/blip5.mp3",
++   "seconds": 0.31,
++   "credit": "User pan14 on Freesound.org",
++   "license": "CC0",
++   "link": "https://freesound.org/people/pan14/sounds/263129/"
++  },
++  {
++   "category": "Game Blips",
++   "name": "Click 1",
++   "file": "game-blips/click1.mp3",
++   "seconds": 0.05,
++   "credit": "User Raclure on Freesound.org",
++   "license": "CC0",
++   "link": "https://freesound.org/people/Raclure/sounds/483600/"
++  },
++  {
++   "category": "Game Blips",
++   "name": "Fwipp",
++   "file": "game-blips/fwipp.mp3",
++   "seconds": 0.21,
++   "credit": "User Raclure on Freesound.org",
++   "license": "CC0",
++   "link": "https://freesound.org/people/Raclure/sounds/405547/"
++  },
++  {
++   "category": "Game Blips",
++   "name": "Game Bump 1",
++   "file": "game-blips/gameBump1.mp3",
++   "seconds": 0.24,
++   "credit": "User Raclure on Freesound.org",
++   "license": "CC0",
++   "link": "https://freesound.org/people/Raclure/sounds/483602/"
++  },
++  {
++   "category": "Game Blips",
++   "name": "Long Beep 1",
++   "file": "game-blips/longBeep1.mp3",
++   "seconds": 8.72,
++   "credit": "User pan14 on Freesound.org",
++   "license": "CC0",
++   "link": "https://freesound.org/people/pan14/sounds/263130/"
++  },
++  {
++   "category": "Game Blips",
++   "name": "Long Beep 2",
++   "file": "game-blips/longBeep2.mp3",
++   "seconds": 7.08,
++   "credit": "User pan14 on Freesound.org",
++   "license": "CC0",
++   "link": "https://freesound.org/people/pan14/sounds/263127/"
++  },
++  {
++   "category": "Game Blips",
++   "name": "Poof",
++   "file": "game-blips/poof.mp3",
++   "seconds": 0.96,
++   "credit": "User: Planman on Freesound.org",
++   "license": "CC0",
++   "link": "https://freesound.org/people/Planman/sounds/208111/"
++  },
++  {
++   "category": "Game Blips",
++   "name": "Stone 1",
++   "file": "game-blips/stone1.mp3",
++   "seconds": 0.68,
++   "credit": "User: Mediaman57 on Freesound.org",
++   "license": "CC0",
++   "link": "https://freesound.org/people/Mediaman57/sounds/347149/"
++  },
++  {
++   "category": "Game Blips",
++   "name": "Stone 2",
++   "file": "game-blips/stone2.mp3",
++   "seconds": 3.11,
++   "credit": "User: ertfelda on Freesound.org",
++   "license": "CC0",
++   "link": "https://freesound.org/people/ertfelda/sounds/243699/"
++  },
++  {
++   "category": "Game Blips",
++   "name": "Thump",
++   "file": "game-blips/thump.mp3",
++   "seconds": 0.34,
++   "credit": "User OtisJames on Freesound.org",
++   "license": "CC0",
++   "link": "https://freesound.org/people/OtisJames/sounds/249613/"
++  },
++  {
++   "category": "Game Blips",
++   "name": "Thunk",
++   "file": "game-blips/thunk.mp3",
++   "seconds": 0.29,
++   "credit": "User jameswrowles on Freesound.org",
++   "license": "CC0",
++   "link": "https://freesound.org/people/jameswrowles/sounds/380640/"
++  },
++  {
++   "category": "Game Blips",
++   "name": "Woop 1",
++   "file": "game-blips/woop1.mp3",
++   "seconds": 0.26,
++   "credit": "User Raclure on Freesound.org",
++   "license": "CC0",
++   "link": "https://freesound.org/people/Raclure/sounds/483604/"
++  },
++  {
++   "category": "Game Blips",
++   "name": "Woop 2",
++   "file": "game-blips/woop2.mp3",
++   "seconds": 0.31,
++   "credit": "User Raclure on Freesound.org",
++   "license": "CC0",
++   "link": "https://freesound.org/people/Raclure/sounds/483603/"
++  },
++  {
++   "category": "Game Blips",
++   "name": "Woop 3",
++   "file": "game-blips/woop3.mp3",
++   "seconds": 0.24,
++   "credit": "User Raclure on Freesound.org",
++   "license": "CC0",
++   "link": "https://freesound.org/people/Raclure/sounds/405548/"
++  },
++  {
++   "category": "Game Blips",
++   "name": "Woosh",
++   "file": "game-blips/woosh.mp3",
++   "seconds": 0.94,
++   "credit": "User freakinbehemoth on Freesound.org",
++   "license": "CC0",
++   "link": "https://freesound.org/people/freakinbehemoth/sounds/243400/"
++  },
++  {
++   "category": "Game Blips",
++   "name": "Wrong 1",
++   "file": "game-blips/wrong1.mp3",
++   "seconds": 0.31,
++   "credit": "User Raclure on Freesound.org",
++   "license": "CC0",
++   "link": "https://freesound.org/people/Raclure/sounds/483598/"
++  },
++  {
++   "category": "Game Blips",
++   "name": "Wrong 2",
++   "file": "game-blips/wrong2.mp3",
++   "seconds": 1.28,
++   "credit": "User pan14 on Freesound.org",
++   "license": "CC0",
++   "link": "https://freesound.org/people/pan14/sounds/263123/"
++  },
++  {
++   "category": "Game Blips",
++   "name": "Zhoop",
++   "file": "game-blips/zhoop.mp3",
++   "seconds": 0.73,
++   "credit": "User Raclure on Freesound.org",
++   "license": "CC0",
++   "link": "https://freesound.org/people/Raclure/sounds/483608/"
++  }
++ ]
++}
+\ No newline at end of file
 diff --git a/src/Editor/Editor.jsx b/src/Editor/Editor.jsx
 index f4c1ad4..c0487f6 100644
 --- a/src/Editor/Editor.jsx
@@ -131,10 +2399,18 @@ index f4c1ad4..c0487f6 100644
      // Wick Project File Input
      this.openProjectFileFromClient = window.createFileInput({
 diff --git a/src/Editor/EditorCore.jsx b/src/Editor/EditorCore.jsx
-index 0383385..46b9947 100644
+index 0383385..4f73f88 100644
 --- a/src/Editor/EditorCore.jsx
 +++ b/src/Editor/EditorCore.jsx
-@@ -1336,6 +1336,48 @@ class EditorCore extends Component {
+@@ -23,6 +23,7 @@ import VideoExport from './export/VideoExport';
+ import GIFExport from './export/GIFExport';
+ import GIFImport from './import/GIFImport';
+ import AudioExport from './export/AudioExport';
++import 'cloud/cloud';
+ 
+ class EditorCore extends Component {
+ 
+@@ -1336,6 +1337,175 @@ class EditorCore extends Component {
      this.project.prepareProjectForEditor();
    }
  
@@ -150,11 +2426,13 @@ index 0383385..46b9947 100644
 +      cancelText: "Cancel",
 +      acceptAction: () => {
 +        this.showWaitOverlay('Opening example...');
-+        fetch(process.env.PUBLIC_URL + '/learn/' + exercise.file)
-+          .then(resp => {
-+            if (!resp.ok) throw new Error('HTTP ' + resp.status);
-+            return resp.blob();
-+          })
++        let download = exercise.cloudId
++          ? window.wickCloud.loadLearn(exercise.cloudId)
++          : fetch(process.env.PUBLIC_URL + '/learn/' + exercise.file).then(resp => {
++              if (!resp.ok) throw new Error('HTTP ' + resp.status);
++              return resp.blob();
++            });
++        download
 +          .then(blob => {
 +            window.Wick.WickFile.fromWickFile(blob, project => {
 +              if (!project) {
@@ -180,25 +2458,185 @@ index 0383385..46b9947 100644
 +    });
 +  }
 +
++  /**
++   * A small JPEG of frame 1 for project lists and Learn cards. Returns a data URL, or null if it fails.
++   * Renders frame 1 on the editor canvas with the whole project in view, copies the project area
++   * into a small canvas, then puts the editor back the way it was.
++   */
++  makeProjectThumbnail = (width) => {
++    let project = this.project;
++    let view = project.view;
++    let w = width || 320;
++    let h = Math.max(1, Math.round(w * project.height / project.width));
++    let saved = { zoom: project.zoom, pan: Object.assign({}, project.pan), onion: project.onionSkinEnabled };
++    let url = null;
++    try {
++      project.history.saveSnapshot('before-thumbnail');
++      project.selection.clear();
++      project.publishedMode = 'imageSequence';
++      project.focus = project.root;
++      project.focus.timeline.playheadPosition = 1;
++      project.onionSkinEnabled = false;
++      project.zoom = Math.max(0.05, view.calculateFitZoom() * 0.95);
++      project.pan = {x: 0, y: 0};
++      view.render();
++      view.paper.view.update();
++      let pv = view.paper.view;
++      let ratio = pv.pixelRatio || window.devicePixelRatio || 1;
++      let tl = pv.projectToView(new window.paper.Point(0, 0));
++      let br = pv.projectToView(new window.paper.Point(project.width, project.height));
++      let out = window.document.createElement('canvas');
++      out.width = w; out.height = h;
++      let ctx = out.getContext('2d');
++      ctx.fillStyle = project.backgroundColor ? project.backgroundColor.hex || String(project.backgroundColor) : '#ffffff';
++      ctx.fillRect(0, 0, w, h);
++      ctx.drawImage(view.canvas, tl.x * ratio, tl.y * ratio, (br.x - tl.x) * ratio, (br.y - tl.y) * ratio, 0, 0, w, h);
++      url = out.toDataURL('image/jpeg', 0.75);
++    } catch (e) {
++      console.error('makeProjectThumbnail:', e);
++    }
++    try {
++      project.history.loadSnapshot('before-thumbnail');
++      project.publishedMode = false;
++      project.zoom = saved.zoom;
++      project.pan = saved.pan;
++      project.onionSkinEnabled = saved.onion;
++      view.render();
++    } catch (e) {
++      console.error('makeProjectThumbnail restore:', e);
++    }
++    return url;
++  }
++
++  /**
++   * The current project as a .wick blob plus a thumbnail, for saving online.
++   */
++  getProjectForCloud = (title) => {
++    return new Promise((resolve, reject) => {
++      if (title) this.project.name = title;
++      let thumb = this.makeProjectThumbnail(320);
++      window.Wick.WickFile.toWickFile(this.project, file => {
++        if (!file) { reject(new Error('export-failed')); return; }
++        resolve({
++          blob: new Blob([file], {type: 'application/zip'}),
++          title: this.project.name,
++          thumb: thumb,
++          uuid: this.project.uuid,
++        });
++      });
++    });
++  }
++
++  /**
++   * Open a project that was saved online. `info.id` is remembered so the next save updates it.
++   */
++  openCloudProject = (blob, info) => {
++    this.showWaitOverlay('Opening...');
++    window.Wick.WickFile.fromWickFile(blob, project => {
++      if (!project) {
++        this.hideWaitOverlay();
++        this.toast('Could not open that project.', 'error');
++        return;
++      }
++      this.setupNewProject(project);
++      if (window.wickCloud) window.wickCloud.setOpenProject(project.uuid, info && info.own ? info.id : null, info && info.title);
++      this.toast('Opened "' + ((info && info.title) || project.name) + '".', 'success');
++    }, 'blob');
++  }
++
++  /**
++   * Add a sound from the Sound Effects library: import it (or reuse it if it's
++   * already in the project), then put it on a "Sounds" layer at the playhead.
++   */
++  addLibrarySound = (file, displayName, seconds) => {
++    let Wick = window.Wick;
++    let place = (asset) => {
++      if (!asset) { this.toast('Could not add ' + displayName + '.', 'error'); return; }
++      let project = this.project;
++      let timeline = project.activeTimeline;
++      let layer = timeline.layers.find(l => /^\s*sounds?\s*$/i.test(l.name || ''));
++      if (!layer) {
++        layer = new Wick.Layer({ name: 'Sounds' });
++        timeline.addLayer(layer);
++      }
++      let pos = timeline.playheadPosition;
++      let frame = layer.getFrameAtPlayheadPosition(pos);
++      if (frame) {
++        if (frame.sound) {
++          this.toast('There is already a sound at frame ' + pos + '. Move the playhead and try again.', 'error');
++          return;
++        }
++        frame.sound = asset;
++      } else {
++        let length = Math.max(1, Math.ceil(seconds * project.framerate));
++        let end = pos + length - 1;
++        layer.frames.forEach(f => { if (f.start > pos && f.start - 1 < end) end = f.start - 1; });
++        frame = new Wick.Frame({ start: pos, end: end });
++        layer.addFrame(frame);
++        frame.sound = asset;
++      }
++      this.projectDidChange({ actionName: 'Add Sound Effect' });
++      this.toast('Added ' + displayName + ' at frame ' + pos + ' on the Sounds layer.', 'success');
++    };
++    let existing = this.project.getAssets().find(a => a instanceof Wick.SoundAsset && a.filename === file.name);
++    if (existing) { place(existing); return; }
++    this.project.importFile(file, place);
++  }
++
    openNewProjectConfirmation = () => {
      this.openWarningModal({
        description: "You will lose any unsaved changes.",
 diff --git a/src/Editor/EditorWrapper.jsx b/src/Editor/EditorWrapper.jsx
-index d19a6c0..f3f8b00 100644
+index d19a6c0..8aac91a 100644
 --- a/src/Editor/EditorWrapper.jsx
 +++ b/src/Editor/EditorWrapper.jsx
-@@ -67,6 +67,7 @@ export default function EditorWrapper(props) {
+@@ -67,6 +67,12 @@ export default function EditorWrapper(props) {
                      openModal={props.editor.openModal}
                      closeActiveModal={props.editor.closeActiveModal}
                      queueModal={props.editor.queueModal}
 +                    openLearnExample={props.editor.openLearnExample}
++                    addLibrarySound={props.editor.addLibrarySound}
++                    getProjectForCloud={props.editor.getProjectForCloud}
++                    openCloudProject={props.editor.openCloudProject}
++                    getProjectName={() => props.editor.project.name}
++                    getProjectUuid={() => props.editor.project.uuid}
                      project={props.editor.project}
                      createClipFromSelection={props.editor.createClipFromSelection}
                      createButtonFromSelection={props.editor.createButtonFromSelection}
 diff --git a/src/Editor/Modals/BuiltinLibrary/BuiltinLibrary.jsx b/src/Editor/Modals/BuiltinLibrary/BuiltinLibrary.jsx
-index d30e413..1ef45ff 100644
+index d30e413..fc812b3 100644
 --- a/src/Editor/Modals/BuiltinLibrary/BuiltinLibrary.jsx
 +++ b/src/Editor/Modals/BuiltinLibrary/BuiltinLibrary.jsx
+@@ -25,7 +25,7 @@ import ActionButton from 'Editor/Util/ActionButton/ActionButton';
+ import AudioPlayer from 'Editor/Util/AudioPlayer/AudioPlayer';
+ 
+ import wickobjects from './wickobjects.js'
+-import sounds from './sounds.js'
++import SoundLibrary from '../SoundLibrary/SoundLibrary';
+ 
+ import './_builtinlibrary.scss';
+ 
+@@ -45,15 +45,15 @@ class BuiltinLibrary extends Component {
+       <WickModal
+       open={this.props.open}
+       toggle={this.props.toggle}
+-      className="modal-body welcome-modal-body"
+-      overlayClassName="modal-overlay welcome-modal-overlay">
++      className="modal-body sound-lib-modal-body builtin-library-modal"
++      overlayClassName="modal-overlay sound-lib-modal-overlay">
+         <div className='builtin-library'>
+           <div className="builtin-library-modal-title">
+-            Builtin Library (Beta)
++            Builtin Library
+           </div>
+-          <TabbedInterface tabNames={["Clips", "Sounds"]} >
++          <TabbedInterface tabNames={["Sounds", "Clips"]} >
++            <SoundLibrary addLibrarySound={this.props.addLibrarySound} toast={this.props.toast} />
+             <div className="builtin-library-asset-grid">{wickobjects.assets.map(this.renderBuiltinAsset)}</div>
+-            <div className="builtin-library-asset-grid">{sounds.assets.map(this.renderSoundAsset)}</div>
+           </TabbedInterface>
+         </div>
+       </WickModal>
 @@ -62,7 +62,7 @@ class BuiltinLibrary extends Component {
  
    //Fetch file, add to builtinPreviews
@@ -210,10 +2648,10 @@ index d30e413..1ef45ff 100644
      .then((response) => response.blob())
 diff --git a/src/Editor/Modals/Learn/Learn.jsx b/src/Editor/Modals/Learn/Learn.jsx
 new file mode 100644
-index 0000000..5bf5a65
+index 0000000..ca91a83
 --- /dev/null
 +++ b/src/Editor/Modals/Learn/Learn.jsx
-@@ -0,0 +1,205 @@
+@@ -0,0 +1,214 @@
 +/*
 + * Learn: example exercises and animation principles.
 + *
@@ -227,6 +2665,7 @@ index 0000000..5bf5a65
 +
 +import React, { Component } from 'react';
 +import WickModal from 'Editor/Modals/WickModal/WickModal';
++import cloud from 'cloud/cloud';
 +
 +import './_learn.scss';
 +
@@ -246,6 +2685,10 @@ index 0000000..5bf5a65
 +    return process.env.PUBLIC_URL + '/learn/';
 +  }
 +
++  static previewSrc (exercise) {
++    return /^data:/.test(exercise.preview) ? exercise.preview : Learn.ROOT + exercise.preview;
++  }
++
 +  componentDidUpdate (prevProps) {
 +    if (this.props.open && !prevProps.open) {
 +      this.loadCatalog();
@@ -260,12 +2703,16 @@ index 0000000..5bf5a65
 +        return resp.json();
 +      })
 +      .then(catalog => {
-+        this.setState({
-+          catalog: {
-+            principles: catalog.principles || [],
-+            exercises: catalog.exercises || [],
-+          },
-+          error: false,
++        // Examples the teacher published from teacher mode are stored online; add them after the site's own.
++        let online = cloud.enabled().then(on => (on ? cloud.listLearn() : [])).catch(e => { console.error('Learn: online examples', e); return []; });
++        return online.then(extra => {
++          this.setState({
++            catalog: {
++              principles: catalog.principles || [],
++              exercises: (catalog.exercises || []).concat(extra || []),
++            },
++            error: false,
++          });
 +        });
 +      })
 +      .catch(e => {
@@ -315,7 +2762,7 @@ index 0000000..5bf5a65
 +        onClick={() => this.open(exercise)}>
 +        <div className='learn-card-preview'>
 +          {exercise.preview
-+            ? <img alt={exercise.title} loading='lazy' src={Learn.ROOT + exercise.preview} />
++            ? <img alt={exercise.title} loading='lazy' src={Learn.previewSrc(exercise)} />
 +            : <div className='learn-card-placeholder'>{exercise.title.charAt(0)}</div>}
 +        </div>
 +        <div className='learn-card-title'>{exercise.title}</div>
@@ -368,7 +2815,7 @@ index 0000000..5bf5a65
 +                <div className='learn-principle-exercises'>
 +                  {exercises.map(ex =>
 +                    <button key={ex.id} className='learn-principle-exercise' onClick={() => this.open(ex)}>
-+                      {ex.preview && <img alt='' loading='lazy' src={Learn.ROOT + ex.preview} />}
++                      {ex.preview && <img alt='' loading='lazy' src={Learn.previewSrc(ex)} />}
 +                      <span>{ex.title}</span>
 +                    </button>)}
 +                </div>}
@@ -653,32 +3100,34 @@ index 0000000..0b52fe6
 +  }
 +}
 diff --git a/src/Editor/Modals/MobileMenu/MobileMenu.jsx b/src/Editor/Modals/MobileMenu/MobileMenu.jsx
-index 270900a..93ea58c 100644
+index 270900a..ed46549 100644
 --- a/src/Editor/Modals/MobileMenu/MobileMenu.jsx
 +++ b/src/Editor/Modals/MobileMenu/MobileMenu.jsx
-@@ -32,7 +32,8 @@ class MobileMenu extends Component {
+@@ -32,7 +32,9 @@ class MobileMenu extends Component {
        overlayClassName: "modal-overlay mobile-menu-overlay",
      };
  
 -    let items = [{text: "new", icon: "create-white", action: this.props.openNewProjectConfirmation},
 +    let items = [{text: "learn", icon: "play", action: () => this.props.openModal('Learn')},
++        {text: "my work", icon: "load-white", action: () => this.props.openModal('MyWork')},
 +        {text: "new", icon: "create-white", action: this.props.openNewProjectConfirmation},
          {text: "open", icon: "load-white", action: this.props.openProjectFileDialog},
          {text: "export", icon: "export", action: () => this.props.openModal('ExportOptions')},
          {text: "settings", icon: "gear-white", action: () => this.props.openModal('SettingsModal')},
 diff --git a/src/Editor/Modals/ModalHandler/ModalHandler.jsx b/src/Editor/Modals/ModalHandler/ModalHandler.jsx
-index b3f225d..4c3f43b 100644
+index b3f225d..a6f82a1 100644
 --- a/src/Editor/Modals/ModalHandler/ModalHandler.jsx
 +++ b/src/Editor/Modals/ModalHandler/ModalHandler.jsx
-@@ -28,6 +28,7 @@ import GeneralWarning from '../GeneralWarning/GeneralWarning';
+@@ -28,6 +28,8 @@ import GeneralWarning from '../GeneralWarning/GeneralWarning';
  import ExportMedia from '../ExportMedia/ExportMedia';
  import SettingsModal from '../SettingsModal/SettingsModal';
  import BuiltinLibrary from '../BuiltinLibrary/BuiltinLibrary';
 +import Learn from '../Learn/Learn';
++import MyWork from '../MyWork/MyWork';
  import EditorInfo from '../EditorInfo/EditorInfo';
  import OpenSourceNotices from '../OpenSourceNotices/OpenSourceNotices';
  import MobileMenu from '../MobileMenu/MobileMenu';
-@@ -122,6 +123,11 @@ class ModalHandler extends Component {
+@@ -122,10 +124,26 @@ class ModalHandler extends Component {
            setToolSetting={this.props.setToolSetting}
            getToolSettingRestrictions={this.props.getToolSettingRestrictions}
          />
@@ -687,14 +3136,1482 @@ index b3f225d..4c3f43b 100644
 +          open={this.props.activeModalName === 'Learn'}
 +          openLearnExample={this.props.openLearnExample}
 +        />
++        <MyWork
++          toggle={this.props.closeActiveModal}
++          open={this.props.activeModalName === 'MyWork'}
++          toast={this.props.toast}
++          getProjectForCloud={this.props.getProjectForCloud}
++          openCloudProject={this.props.openCloudProject}
++          getProjectName={this.props.getProjectName}
++          getProjectUuid={this.props.getProjectUuid}
++        />
          <BuiltinLibrary
            openModal={this.props.openModal}
            toggle={this.props.closeActiveModal}
+           open={this.props.activeModalName === 'BuiltinLibrary'}
++          addLibrarySound={this.props.addLibrarySound}
++          toast={this.props.toast}
+           project={this.props.project}
+           importFileAsAsset={this.props.importFileAsAsset}
+           builtinPreviews={this.props.builtinPreviews}
+diff --git a/src/Editor/Modals/MyWork/MyWork.jsx b/src/Editor/Modals/MyWork/MyWork.jsx
+new file mode 100644
+index 0000000..8812332
+--- /dev/null
++++ b/src/Editor/Modals/MyWork/MyWork.jsx
+@@ -0,0 +1,693 @@
++/*
++ * My Work: student logins (class + picture + PIN), online saves, and teacher
++ * mode (classes, login cards, Learn publishing, Class Sounds).
++ *
++ * Everything goes through src/cloud/cloud.js. If the site has no
++ * cloud-config.json, this modal says online saving isn't set up.
++ *
++ * This file is part of a modified version of Wick Editor and is licensed
++ * under the GNU General Public License v3 or later.
++ */
++
++import React, { Component } from 'react';
++import WickModal from 'Editor/Modals/WickModal/WickModal';
++import cloud from 'cloud/cloud';
++
++import './_mywork.scss';
++
++function when (ms) {
++  if (!ms) return '';
++  let d = new Date(ms);
++  let today = new Date();
++  if (d.toDateString() === today.toDateString()) return 'Today ' + d.toLocaleTimeString([], { hour: 'numeric', minute: '2-digit' });
++  return d.toLocaleDateString([], { month: 'short', day: 'numeric' });
++}
++
++function Picture ({ label, size }) {
++  let p = cloud.pictureFor(label);
++  return (
++    <span className='mywork-pic' style={{ background: p.color, width: size || 56, height: size || 56, fontSize: (size || 56) * 0.6 }}>
++      {p.emoji}
++    </span>
++  );
++}
++
++class MyWork extends Component {
++  constructor (props) {
++    super(props);
++    this.state = {
++      enabled: null,
++      user: null,
++      busy: false,
++      error: null,
++      // signing in
++      step: 'class', classes: null, classId: null, label: null, pin: '',
++      email: '', password: '', newTeacherUid: null,
++      // signed in
++      tab: 'work', projects: null, saveTitle: '', confirmDelete: null,
++      // teacher
++      teacherClasses: null, selectedClass: null, pins: {}, newClassName: '', addCount: 5,
++      classProjects: null, learnItems: null, principles: [],
++      learnForm: { cloudId: null, title: '', description: '', principles: [], replaceFile: true },
++      sounds: null, soundName: '', playing: null,
++    };
++    this.audio = null;
++  }
++
++  componentDidMount () {
++    cloud.enabled().then(on => {
++      this.setState({ enabled: !!on });
++      if (on) this.unsub = cloud.onUserChange(user => this.setState({ user: user }, () => this.props.open && this.refresh()));
++    });
++  }
++
++  componentWillUnmount () {
++    if (this.unsub) this.unsub();
++  }
++
++  componentDidUpdate (prevProps) {
++    if (this.props.open && !prevProps.open) {
++      this.setState({ error: null, confirmDelete: null, saveTitle: this.props.getProjectName ? this.props.getProjectName() : '' });
++      this.refresh();
++    }
++    if (!this.props.open && prevProps.open) this.stopSound();
++  }
++
++  /* ---------- helpers ---------- */
++
++  run = (fn, okMessage) => {
++    this.setState({ busy: true, error: null });
++    return Promise.resolve()
++      .then(fn)
++      .then(r => { this.setState({ busy: false }); if (okMessage) this.props.toast(okMessage, 'success'); return r; })
++      .catch(e => { console.error(e); this.setState({ busy: false, error: cloud.message(e) }); throw e; });
++  }
++
++  refresh = () => {
++    let user = this.state.user;
++    if (!this.state.enabled) return;
++    if (!user) {
++      if (!this.state.classes) cloud.listClasses().then(c => this.setState({ classes: c })).catch(e => this.setState({ error: cloud.message(e) }));
++      return;
++    }
++    if (user.role === 'student' || user.role === 'teacher') this.loadProjects();
++    if (user.role === 'teacher') {
++      this.loadTeacherClasses();
++      if (this.state.tab === 'learn') this.loadLearn();
++      if (this.state.tab === 'sounds') this.loadSounds();
++    }
++  }
++
++  setTab = (tab) => {
++    this.setState({ tab: tab, error: null, confirmDelete: null }, () => {
++      if (tab === 'learn') this.loadLearn();
++      if (tab === 'sounds') this.loadSounds();
++      if (tab === 'classes') this.loadTeacherClasses();
++      if (tab === 'work') this.loadProjects();
++    });
++  }
++
++  /* ---------- sign in ---------- */
++
++  pickClass = (cls) => this.setState({ classId: cls.id, step: 'pick', error: null });
++  pickLabel = (label) => this.setState({ label: label, step: 'pin', pin: '', error: null });
++
++  pressKey = (k) => {
++    if (this.state.busy) return;
++    if (k === 'back') { this.setState({ pin: this.state.pin.slice(0, -1), error: null }); return; }
++    let pin = (this.state.pin + k).slice(0, 4);
++    this.setState({ pin: pin, error: null });
++    if (pin.length === 4) {
++      this.run(() => cloud.studentSignIn(this.state.classId, this.state.label, pin))
++        .then(() => this.setState({ step: 'class', pin: '', tab: 'work' }))
++        .catch(() => this.setState({ pin: '' }));
++    }
++  }
++
++  teacherSignIn = (e) => {
++    e.preventDefault();
++    this.run(() => cloud.teacherSignIn(this.state.email.trim(), this.state.password))
++      .then(() => this.setState({ password: '', step: 'class', tab: 'work' })).catch(() => {});
++  }
++
++  teacherCreate = (e) => {
++    e.preventDefault();
++    this.run(() => cloud.teacherCreateAccount(this.state.email.trim(), this.state.password))
++      .then(uid => this.setState({ password: '', newTeacherUid: uid })).catch(() => {});
++  }
++
++  signOut = () => {
++    this.run(() => cloud.signOut()).then(() => {
++      cloud.setOpenProject(null, null);
++      this.setState({ step: 'class', classId: null, label: null, projects: null, teacherClasses: null,
++        selectedClass: null, classProjects: null, tab: 'work', classes: null }, this.refresh);
++    }).catch(() => {});
++  }
++
++  /* ---------- my work ---------- */
++
++  loadProjects = () => {
++    cloud.listProjects().then(p => this.setState({ projects: p })).catch(e => this.setState({ error: cloud.message(e) }));
++  }
++
++  save = (asNew) => {
++    let title = (this.state.saveTitle || '').trim() || 'Untitled';
++    let saved;
++    this.run(() => this.props.getProjectForCloud(title).then(p => {
++      let open = asNew ? null : cloud.openProjectFor(p.uuid);
++      return cloud.saveProject({ id: open ? open.id : null, title: title, thumb: p.thumb, blob: p.blob })
++        .then(id => { saved = { id, uuid: p.uuid }; });
++    }), 'Saved "' + title + '" to My Work.').then(() => {
++      cloud.setOpenProject(saved.uuid, saved.id, title);
++      this.loadProjects();
++    }).catch(() => {});
++  }
++
++  openProject = (p, own) => {
++    this.run(() => cloud.loadProject(p.id)).then(blob => {
++      this.props.toggle();
++      this.props.openCloudProject(blob, { id: p.id, title: p.title, own: own });
++    }).catch(() => {});
++  }
++
++  deleteProject = (p) => {
++    if (this.state.confirmDelete !== p.id) { this.setState({ confirmDelete: p.id }); return; }
++    this.run(() => cloud.deleteProject(p.id), 'Deleted "' + p.title + '".').then(() => {
++      this.setState({ confirmDelete: null });
++      this.loadProjects();
++      if (this.state.selectedClass) this.loadClassProjects(this.state.selectedClass);
++    }).catch(() => {});
++  }
++
++  /* ---------- teacher: classes ---------- */
++
++  loadTeacherClasses = () => {
++    cloud.listClasses().then(c => {
++      this.setState({ teacherClasses: c });
++      let sel = this.state.selectedClass;
++      if (sel && !c.find(x => x.id === sel)) this.setState({ selectedClass: null });
++    }).catch(e => this.setState({ error: cloud.message(e) }));
++  }
++
++  selectClass = (id) => {
++    this.setState({ selectedClass: id, pins: {}, classProjects: null, confirmDelete: null });
++    cloud.getClassSecrets(id).then(pins => this.setState({ pins: pins })).catch(() => {});
++    this.loadClassProjects(id);
++  }
++
++  loadClassProjects = (id) => {
++    cloud.listProjects({ classId: id }).then(p => this.setState({ classProjects: p })).catch(() => {});
++  }
++
++  createClass = (e) => {
++    e.preventDefault();
++    let name = this.state.newClassName.trim();
++    if (!name) return;
++    this.run(() => cloud.createClass(name), 'Made the class "' + name + '".').then(id => {
++      this.setState({ newClassName: '' });
++      this.loadTeacherClasses();
++      this.selectClass(id);
++    }).catch(() => {});
++  }
++
++  addStudents = () => {
++    let n = Math.max(1, Math.min(40, parseInt(this.state.addCount, 10) || 1));
++    let id = this.state.selectedClass;
++    this.run(() => cloud.addStudents(id, n), 'Added ' + n + (n === 1 ? ' student.' : ' students.')).then(() => {
++      this.loadTeacherClasses();
++      cloud.getClassSecrets(id).then(pins => this.setState({ pins: pins }));
++    }).catch(() => {});
++  }
++
++  resetPin = (label) => {
++    let id = this.state.selectedClass;
++    this.run(() => cloud.resetPin(id, label), label + ' has a new PIN.').then(() => {
++      this.loadTeacherClasses();
++      cloud.getClassSecrets(id).then(pins => this.setState({ pins: pins }));
++    }).catch(() => {});
++  }
++
++  removeStudent = (label) => {
++    let key = 'student:' + label;
++    if (this.state.confirmDelete !== key) { this.setState({ confirmDelete: key }); return; }
++    this.run(() => cloud.removeStudent(this.state.selectedClass, label), 'Removed ' + label + '.')
++      .then(() => { this.setState({ confirmDelete: null }); this.loadTeacherClasses(); }).catch(() => {});
++  }
++
++  printCards = () => {
++    let cls = (this.state.teacherClasses || []).find(c => c.id === this.state.selectedClass);
++    if (!cls) return;
++    let site = window.location.origin + window.location.pathname.replace(/index\.html$/, '');
++    let esc = (s) => String(s).replace(/[&<>"]/g, c => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;' }[c]));
++    let cards = (cls.students || []).map(s => {
++      let p = cloud.pictureFor(s.label);
++      return '<div class="card"><div class="pic" style="background:' + p.color + '">' + p.emoji + '</div>' +
++        '<div class="name">' + esc(s.label) + '</div><div class="pin">PIN <b>' + esc(this.state.pins[s.label] || '????') + '</b></div>' +
++        '<div class="cls">' + esc(cls.name) + '</div><div class="site">' + esc(site) + '</div></div>';
++    }).join('');
++    let w = window.open('', '_blank');
++    if (!w) { this.props.toast('Allow pop-ups for this site to print the cards.', 'error'); return; }
++    w.document.write('<!DOCTYPE html><html><head><meta charset="utf-8"><title>Login cards: ' + esc(cls.name) + '</title><style>' +
++      'body{font-family:-apple-system,Helvetica,Arial,sans-serif;margin:16px}' +
++      '.grid{display:grid;grid-template-columns:repeat(3,1fr);gap:12px}' +
++      '.card{border:2px dashed #999;border-radius:14px;padding:14px;text-align:center;break-inside:avoid}' +
++      '.pic{width:90px;height:90px;border-radius:50%;margin:0 auto 6px;font-size:58px;line-height:90px}' +
++      '.name{font-size:22px;font-weight:bold}.pin{font-size:20px;margin:4px 0}.pin b{letter-spacing:4px;font-size:26px}' +
++      '.cls{font-size:13px;color:#555}.site{font-size:11px;color:#777;margin-top:4px}' +
++      '@media print{button{display:none}}</style></head><body>' +
++      '<button onclick="window.print()" style="font-size:18px;padding:8px 18px;margin-bottom:12px">Print</button>' +
++      '<div class="grid">' + cards + '</div></body></html>');
++    w.document.close();
++  }
++
++  /* ---------- teacher: Learn ---------- */
++
++  loadLearn = () => {
++    cloud.listLearn().then(items => this.setState({ learnItems: items })).catch(e => this.setState({ error: cloud.message(e) }));
++    if (!this.state.principles.length) {
++      fetch(process.env.PUBLIC_URL + '/learn/catalog.json?t=' + Date.now())
++        .then(r => r.json()).then(c => this.setState({ principles: c.principles || [] })).catch(() => {});
++    }
++  }
++
++  editLearn = (item) => {
++    this.setState({ learnForm: { cloudId: item ? item.cloudId : null, title: item ? item.title : '', description: item ? item.description || '' : '',
++      principles: item ? (item.principles || []).slice() : [], replaceFile: !item } });
++  }
++
++  setLearnForm = (patch) => this.setState({ learnForm: Object.assign({}, this.state.learnForm, patch) });
++
++  togglePrinciple = (id) => {
++    let list = this.state.learnForm.principles.slice();
++    let i = list.indexOf(id);
++    if (i === -1) list.push(id); else list.splice(i, 1);
++    this.setLearnForm({ principles: list });
++  }
++
++  publishLearn = (e) => {
++    e.preventDefault();
++    let f = this.state.learnForm;
++    let title = f.title.trim();
++    if (!title) { this.setState({ error: 'Give the example a title.' }); return; }
++    let info = { title: title, description: f.description.trim(), principles: f.principles };
++    let job;
++    if (f.cloudId && !f.replaceFile) {
++      job = () => cloud.updateLearnInfo(f.cloudId, info);
++    } else {
++      job = () => this.props.getProjectForCloud().then(p =>
++        cloud.publishLearn(Object.assign({ cloudId: f.cloudId, preview: p.thumb, blob: p.blob }, info)));
++    }
++    this.run(job, f.cloudId ? 'Updated "' + title + '" in Learn.' : 'Published "' + title + '" to Learn.')
++      .then(() => { this.editLearn(null); this.loadLearn(); }).catch(() => {});
++  }
++
++  deleteLearn = (item) => {
++    let key = 'learn:' + item.cloudId;
++    if (this.state.confirmDelete !== key) { this.setState({ confirmDelete: key }); return; }
++    this.run(() => cloud.deleteLearn(item.cloudId), 'Removed "' + item.title + '" from Learn.')
++      .then(() => { this.setState({ confirmDelete: null }); if (this.state.learnForm.cloudId === item.cloudId) this.editLearn(null); this.loadLearn(); })
++      .catch(() => {});
++  }
++
++  /* ---------- teacher: Class Sounds ---------- */
++
++  loadSounds = () => {
++    cloud.listClassSounds().then(s => this.setState({ sounds: s })).catch(e => this.setState({ error: cloud.message(e) }));
++  }
++
++  uploadSound = (e) => {
++    let file = e.target.files && e.target.files[0];
++    e.target.value = '';
++    if (!file) return;
++    let name = this.state.soundName.trim() || file.name.replace(/\.[^.]+$/, '');
++    let url = URL.createObjectURL(file);
++    let seconds = new Promise(resolve => {
++      let a = new Audio();
++      a.onloadedmetadata = () => resolve(isFinite(a.duration) ? Math.round(a.duration * 10) / 10 : 1);
++      a.onerror = () => resolve(1);
++      a.src = url;
++      setTimeout(() => resolve(1), 4000);
++    });
++    this.run(() => seconds.then(s => cloud.uploadClassSound({ name: name, seconds: s, blob: file })), 'Added "' + name + '" to Class Sounds.')
++      .then(() => { URL.revokeObjectURL(url); this.setState({ soundName: '' }); this.loadSounds(); })
++      .catch(() => URL.revokeObjectURL(url));
++  }
++
++  stopSound = () => {
++    this.playingId = null;
++    if (this.audio) { this.audio.pause(); this.audio = null; }
++    if (this.audioUrl) { URL.revokeObjectURL(this.audioUrl); this.audioUrl = null; }
++    if (this.state.playing) this.setState({ playing: null });
++  }
++
++  playSound = (s) => {
++    if (this.playingId === s.id) { this.stopSound(); return; }
++    this.stopSound();
++    // Start a silent clip inside the tap so iPad Safari allows the real sound once it downloads.
++    let a = new Audio('data:audio/wav;base64,UklGRiQAAABXQVZFZm10IBAAAAABAAEAQB8AAEAfAAABAAgAZGF0YQAAAAA=');
++    this.audio = a; this.playingId = s.id;
++    this.setState({ playing: s.id });
++    a.onended = () => { if (this.audio === a && this.audioUrl) this.stopSound(); };
++    a.play().catch(() => {});
++    cloud.loadClassSound(s.id).then(blob => {
++      if (this.audio !== a) return;
++      this.audioUrl = URL.createObjectURL(blob);
++      a.src = this.audioUrl;
++      a.play().catch(() => { if (this.audio === a) this.stopSound(); });
++    }).catch(() => { if (this.audio === a) this.stopSound(); });
++  }
++
++  deleteSound = (s) => {
++    let key = 'sound:' + s.id;
++    if (this.state.confirmDelete !== key) { this.setState({ confirmDelete: key }); return; }
++    this.run(() => cloud.deleteClassSound(s.id), 'Removed "' + s.name + '".')
++      .then(() => { this.setState({ confirmDelete: null }); this.loadSounds(); }).catch(() => {});
++  }
++
++  /* ---------- render: signed out ---------- */
++
++  renderSignIn () {
++    let { step, classes, classId, label, pin, busy } = this.state;
++    if (step === 'teacher' || step === 'teacher-create') return this.renderTeacherSignIn();
++    let cls = (classes || []).find(c => c.id === classId);
++
++    if (step === 'pin' && cls) {
++      return (
++        <div className='mywork-center'>
++          <button className='mywork-back' onClick={() => this.setState({ step: 'pick', pin: '' })}>‹ Back</button>
++          <Picture label={label} size={96} />
++          <div className='mywork-big-name'>{label}</div>
++          <div className='mywork-pin-dots'>
++            {[0, 1, 2, 3].map(i => <span key={i} className={'mywork-dot' + (i < pin.length ? ' mywork-dot-on' : '')} />)}
++          </div>
++          <div className='mywork-keypad'>
++            {['1', '2', '3', '4', '5', '6', '7', '8', '9', '', '0', 'back'].map((k, i) =>
++              k === '' ? <span key={i} /> :
++                <button key={i} className='mywork-key' disabled={busy} onClick={() => this.pressKey(k)}>{k === 'back' ? '⌫' : k}</button>)}
++          </div>
++        </div>
++      );
++    }
++
++    if (step === 'pick' && cls) {
++      return (
++        <div className='mywork-scroll'>
++          <button className='mywork-back' onClick={() => this.setState({ step: 'class' })}>‹ Classes</button>
++          <div className='mywork-heading'>{cls.name}: tap your picture</div>
++          <div className='mywork-pic-grid'>
++            {(cls.students || []).map(s =>
++              <button key={s.label} className='mywork-pic-button' onClick={() => this.pickLabel(s.label)}>
++                <Picture label={s.label} size={72} />
++                <span>{s.label}</span>
++              </button>)}
++          </div>
++        </div>
++      );
++    }
++
++    return (
++      <div className='mywork-scroll'>
++        <div className='mywork-heading'>Pick your class</div>
++        {!classes && <div className='mywork-empty'>Loading...</div>}
++        {classes && classes.length === 0 && <div className='mywork-empty'>No classes yet. Your teacher will set them up.</div>}
++        <div className='mywork-class-list'>
++          {(classes || []).map(c => <button key={c.id} className='mywork-class-button' onClick={() => this.pickClass(c)}>{c.name}</button>)}
++        </div>
++        <button className='mywork-link mywork-teacher-link' onClick={() => this.setState({ step: 'teacher', error: null })}>I'm a teacher</button>
++      </div>
++    );
++  }
++
++  renderTeacherSignIn () {
++    let { step, email, password, busy, newTeacherUid } = this.state;
++    if (newTeacherUid) return this.renderTeacherPending(newTeacherUid);
++    let creating = step === 'teacher-create';
++    return (
++      <div className='mywork-scroll'>
++        <button className='mywork-back' onClick={() => this.setState({ step: 'class', error: null })}>‹ Student sign in</button>
++        <div className='mywork-heading'>{creating ? 'Make a teacher account' : 'Teacher sign in'}</div>
++        <form className='mywork-form' onSubmit={creating ? this.teacherCreate : this.teacherSignIn}>
++          <input className='mywork-input' type='email' autoComplete='username' placeholder='Email' value={email}
++            onChange={e => this.setState({ email: e.target.value })} />
++          <input className='mywork-input' type='password' autoComplete={creating ? 'new-password' : 'current-password'} placeholder='Password'
++            value={password} onChange={e => this.setState({ password: e.target.value })} />
++          <button className='mywork-primary' type='submit' disabled={busy}>{creating ? 'Make account' : 'Sign in'}</button>
++        </form>
++        <button className='mywork-link' onClick={() => this.setState({ step: creating ? 'teacher' : 'teacher-create', error: null })}>
++          {creating ? 'I already have an account' : 'First time? Make a teacher account'}
++        </button>
++      </div>
++    );
++  }
++
++  renderTeacherPending (uid) {
++    return (
++      <div className='mywork-scroll'>
++        <div className='mywork-heading'>One more step</div>
++        <p>This account isn't a teacher yet. In the Firebase console, open Firestore Database, make a collection called <b>teachers</b>, and add a document whose ID is:</p>
++        <div className='mywork-code'>{uid}</div>
++        <p>Leave the document empty (or add any field). Then come back here and sign in again.</p>
++        <button className='mywork-secondary' onClick={() => { this.setState({ newTeacherUid: null }); this.signOut(); }}>Done</button>
++      </div>
++    );
++  }
++
++  /* ---------- render: signed in ---------- */
++
++  renderProjectCard (p, opts) {
++    let confirming = this.state.confirmDelete === p.id;
++    return (
++      <div key={p.id} className='mywork-card'>
++        <button className='mywork-thumb' onClick={() => this.openProject(p, opts.own)}>
++          {p.thumb ? <img alt='' src={p.thumb} /> : <span>{(p.title || '?').charAt(0)}</span>}
++        </button>
++        <div className='mywork-card-title'>{p.title}</div>
++        <div className='mywork-card-meta'>{opts.showOwner ? p.label + ' · ' : ''}{when(p.updatedAt)}</div>
++        <div className='mywork-card-actions'>
++          <button className='mywork-small' onClick={() => this.openProject(p, opts.own)}>Open</button>
++          {opts.canDelete &&
++            <button className={'mywork-small mywork-danger' + (confirming ? ' mywork-confirm' : '')} onClick={() => this.deleteProject(p)}>
++              {confirming ? 'Tap to delete' : 'Delete'}
++            </button>}
++        </div>
++      </div>
++    );
++  }
++
++  renderWork () {
++    let { projects, saveTitle, busy } = this.state;
++    let uuid = this.props.getProjectUuid ? this.props.getProjectUuid() : null;
++    let open = uuid ? cloud.openProjectFor(uuid) : null;
++    return (
++      <div className='mywork-scroll'>
++        <div className='mywork-save-box'>
++          <input className='mywork-input' placeholder='Name your animation' value={saveTitle} maxLength={60}
++            onChange={e => this.setState({ saveTitle: e.target.value })} />
++          {open
++            ? <React.Fragment>
++                <button className='mywork-primary' disabled={busy} onClick={() => this.save(false)}>Save changes</button>
++                <button className='mywork-secondary' disabled={busy} onClick={() => this.save(true)}>Save as new</button>
++              </React.Fragment>
++            : <button className='mywork-primary' disabled={busy} onClick={() => this.save(true)}>Save to My Work</button>}
++        </div>
++        {busy && <div className='mywork-status'>Working...</div>}
++        {!projects && <div className='mywork-empty'>Loading...</div>}
++        {projects && projects.length === 0 && <div className='mywork-empty'>Nothing saved yet. Name your animation and tap Save.</div>}
++        <div className='mywork-grid'>{(projects || []).map(p => this.renderProjectCard(p, { own: true, canDelete: true }))}</div>
++      </div>
++    );
++  }
++
++  renderClasses () {
++    let { teacherClasses, selectedClass, pins, newClassName, addCount, classProjects, busy, confirmDelete } = this.state;
++    let cls = (teacherClasses || []).find(c => c.id === selectedClass);
++    return (
++      <div className='mywork-split'>
++        <div className='mywork-side'>
++          {(teacherClasses || []).map(c =>
++            <button key={c.id} className={'mywork-side-item' + (c.id === selectedClass ? ' mywork-side-active' : '')} onClick={() => this.selectClass(c.id)}>
++              {c.name}<span>{(c.students || []).length}</span>
++            </button>)}
++          <form onSubmit={this.createClass} className='mywork-new-class'>
++            <input className='mywork-input' placeholder='New class name' value={newClassName} maxLength={40}
++              onChange={e => this.setState({ newClassName: e.target.value })} />
++            <button className='mywork-secondary' type='submit' disabled={busy || !newClassName.trim()}>Add class</button>
++          </form>
++        </div>
++        <div className='mywork-main mywork-scroll'>
++          {!cls && <div className='mywork-empty'>{teacherClasses && teacherClasses.length ? 'Pick a class.' : 'Make your first class on the left.'}</div>}
++          {cls &&
++            <React.Fragment>
++              <div className='mywork-row'>
++                <div className='mywork-heading'>{cls.name}</div>
++                <button className='mywork-secondary' onClick={this.printCards} disabled={!(cls.students || []).length}>Print login cards</button>
++              </div>
++              <div className='mywork-row'>
++                <span>Add</span>
++                <input className='mywork-input mywork-number' type='number' min='1' max='40' value={addCount}
++                  onChange={e => this.setState({ addCount: e.target.value })} />
++                <span>students</span>
++                <button className='mywork-primary' disabled={busy} onClick={this.addStudents}>Add</button>
++              </div>
++              {busy && <div className='mywork-status'>Working...</div>}
++              <div className='mywork-students'>
++                {(cls.students || []).map(s => {
++                  let confirming = confirmDelete === 'student:' + s.label;
++                  return (
++                    <div key={s.label} className='mywork-student'>
++                      <Picture label={s.label} size={40} />
++                      <span className='mywork-student-name'>{s.label}</span>
++                      <span className='mywork-student-pin'>{pins[s.label] || '····'}</span>
++                      <button className='mywork-small' disabled={busy} onClick={() => this.resetPin(s.label)}>New PIN</button>
++                      <button className={'mywork-small mywork-danger' + (confirming ? ' mywork-confirm' : '')} disabled={busy}
++                        onClick={() => this.removeStudent(s.label)}>{confirming ? 'Tap to remove' : 'Remove'}</button>
++                    </div>
++                  );
++                })}
++              </div>
++              <div className='mywork-heading mywork-subheading'>Class work</div>
++              {!classProjects && <div className='mywork-empty'>Loading...</div>}
++              {classProjects && classProjects.length === 0 && <div className='mywork-empty'>No saved work yet.</div>}
++              <div className='mywork-grid'>{(classProjects || []).map(p => this.renderProjectCard(p, { own: false, showOwner: true, canDelete: true }))}</div>
++            </React.Fragment>}
++        </div>
++      </div>
++    );
++  }
++
++  renderLearn () {
++    let { learnItems, learnForm, principles, busy, confirmDelete } = this.state;
++    let editing = !!learnForm.cloudId;
++    return (
++      <div className='mywork-scroll'>
++        <form className='mywork-learn-form' onSubmit={this.publishLearn}>
++          <div className='mywork-heading'>{editing ? 'Edit "' + learnForm.title + '"' : 'Publish the project that\'s open now'}</div>
++          <input className='mywork-input' placeholder='Title (e.g. Bouncing Ball)' value={learnForm.title} maxLength={60}
++            onChange={e => this.setLearnForm({ title: e.target.value })} />
++          <textarea className='mywork-input mywork-textarea' placeholder='Short description or instructions for students' value={learnForm.description}
++            maxLength={400} onChange={e => this.setLearnForm({ description: e.target.value })} />
++          <div className='mywork-chips'>
++            {principles.map(p =>
++              <button type='button' key={p.id} className={'mywork-chip' + (learnForm.principles.indexOf(p.id) !== -1 ? ' mywork-chip-on' : '')}
++                onClick={() => this.togglePrinciple(p.id)}>{p.name}</button>)}
++          </div>
++          {editing &&
++            <label className='mywork-check'>
++              <input type='checkbox' checked={learnForm.replaceFile} onChange={e => this.setLearnForm({ replaceFile: e.target.checked })} />
++              Replace the animation with the project that's open now
++            </label>}
++          <div className='mywork-row'>
++            <button className='mywork-primary' type='submit' disabled={busy}>{editing ? 'Save changes' : 'Publish to Learn'}</button>
++            {editing && <button className='mywork-secondary' type='button' onClick={() => this.editLearn(null)}>Cancel</button>}
++          </div>
++          <div className='mywork-hint'>Name a layer "Notes" for annotations. Students see it in the editor, and it's left out of exports.</div>
++        </form>
++        {busy && <div className='mywork-status'>Working...</div>}
++        <div className='mywork-heading mywork-subheading'>Published</div>
++        {!learnItems && <div className='mywork-empty'>Loading...</div>}
++        {learnItems && learnItems.length === 0 && <div className='mywork-empty'>Nothing published from here yet.</div>}
++        <div className='mywork-grid'>
++          {(learnItems || []).map(item => {
++            let confirming = confirmDelete === 'learn:' + item.cloudId;
++            return (
++              <div key={item.cloudId} className='mywork-card'>
++                <div className='mywork-thumb'>{item.preview ? <img alt='' src={item.preview} /> : <span>{item.title.charAt(0)}</span>}</div>
++                <div className='mywork-card-title'>{item.title}</div>
++                <div className='mywork-card-meta'>{when(item.updatedAt)}</div>
++                <div className='mywork-card-actions'>
++                  <button className='mywork-small' onClick={() => this.editLearn(item)}>Edit</button>
++                  <button className={'mywork-small mywork-danger' + (confirming ? ' mywork-confirm' : '')} onClick={() => this.deleteLearn(item)}>
++                    {confirming ? 'Tap to remove' : 'Remove'}
++                  </button>
++                </div>
++              </div>
++            );
++          })}
++        </div>
++      </div>
++    );
++  }
++
++  renderSounds () {
++    let { sounds, soundName, busy, playing, confirmDelete } = this.state;
++    return (
++      <div className='mywork-scroll'>
++        <div className='mywork-hint'>Sounds here show up as "Class Sounds" in the sound library, only for students signed into your classes.</div>
++        <div className='mywork-row'>
++          <input className='mywork-input' placeholder='Name (optional)' value={soundName} maxLength={50}
++            onChange={e => this.setState({ soundName: e.target.value })} />
++          <label className={'mywork-primary mywork-file' + (busy ? ' mywork-disabled' : '')}>
++            Choose a sound
++            <input type='file' accept='audio/*' disabled={busy} onChange={this.uploadSound} />
++          </label>
++        </div>
++        {busy && <div className='mywork-status'>Uploading...</div>}
++        {!sounds && <div className='mywork-empty'>Loading...</div>}
++        {sounds && sounds.length === 0 && <div className='mywork-empty'>No class sounds yet.</div>}
++        <div className='mywork-sound-list'>
++          {(sounds || []).map(s => {
++            let confirming = confirmDelete === 'sound:' + s.id;
++            return (
++              <div key={s.id} className='mywork-sound'>
++                <button className='mywork-play' onClick={() => this.playSound(s)}>{playing === s.id ? '■' : '▶'}</button>
++                <span className='mywork-sound-name'>{s.name}</span>
++                <span className='mywork-card-meta'>{s.seconds < 1 ? 'short' : Math.round(s.seconds) + 's'}</span>
++                <button className={'mywork-small mywork-danger' + (confirming ? ' mywork-confirm' : '')} onClick={() => this.deleteSound(s)}>
++                  {confirming ? 'Tap to remove' : 'Remove'}
++                </button>
++              </div>
++            );
++          })}
++        </div>
++      </div>
++    );
++  }
++
++  renderSignedIn () {
++    let { user, tab } = this.state;
++    if (user.role === 'none') return this.renderTeacherPending(user.uid);
++    let teacher = user.role === 'teacher';
++    let tabButton = (id, label) =>
++      <button key={id} className={'mywork-tab' + (tab === id ? ' mywork-tab-active' : '')} onClick={() => this.setTab(id)}>{label}</button>;
++    return (
++      <React.Fragment>
++        <div className='mywork-userbar'>
++          {teacher ? <span className='mywork-teacher-badge'>Teacher</span> : <Picture label={user.label} size={36} />}
++          <span className='mywork-username'>{teacher ? user.email : user.label}</span>
++          {teacher && <div className='mywork-tabs'>
++            {tabButton('work', 'My Work')}{tabButton('classes', 'Classes')}{tabButton('learn', 'Learn')}{tabButton('sounds', 'Class Sounds')}
++          </div>}
++          <button className='mywork-link mywork-signout' onClick={this.signOut}>Sign out</button>
++        </div>
++        {(!teacher || tab === 'work') && this.renderWork()}
++        {teacher && tab === 'classes' && this.renderClasses()}
++        {teacher && tab === 'learn' && this.renderLearn()}
++        {teacher && tab === 'sounds' && this.renderSounds()}
++      </React.Fragment>
++    );
++  }
++
++  renderBody () {
++    if (this.state.enabled === null) return <div className='mywork-empty'>Loading...</div>;
++    if (!this.state.enabled) return <div className='mywork-empty'>Online saving isn't set up on this site yet. Use Save to download your project instead.</div>;
++    return this.state.user ? this.renderSignedIn() : this.renderSignIn();
++  }
++
++  render () {
++    return (
++      <WickModal
++        open={this.props.open}
++        toggle={this.props.toggle}
++        className='modal-body mywork-modal-body'
++        overlayClassName='modal-overlay mywork-modal-overlay'>
++        <div className='mywork'>
++          <div className='mywork-title'>My Work</div>
++          {this.state.error && <div className='mywork-error'>{this.state.error}</div>}
++          {this.renderBody()}
++        </div>
++      </WickModal>
++    );
++  }
++}
++
++export default MyWork;
+diff --git a/src/Editor/Modals/MyWork/_mywork.scss b/src/Editor/Modals/MyWork/_mywork.scss
+new file mode 100644
+index 0000000..68d3f9c
+--- /dev/null
++++ b/src/Editor/Modals/MyWork/_mywork.scss
+@@ -0,0 +1,363 @@
++@import 'Editor/_wickbrand.scss';
++
++.mywork-modal-body {
++  width: 860px;
++  height: 640px;
++  max-width: 96vw;
++  max-height: 90vh;
++  padding: 0px;
++}
++
++.mywork {
++  width: 100%;
++  height: 100%;
++  padding: 18px 20px 12px 20px;
++  display: flex;
++  flex-direction: column;
++  text-align: left;
++  color: $editor-modal-text-gray;
++  font-size: 15px;
++}
++
++.mywork-title {
++  font-size: 20px;
++  font-weight: bold;
++  color: $editor-modal-text-white;
++  padding-right: 36px;
++  margin-bottom: 8px;
++}
++
++.mywork-error {
++  background: #5a2a2a;
++  color: #ffd6d6;
++  border-radius: 8px;
++  padding: 8px 12px;
++  margin-bottom: 8px;
++}
++
++.mywork-status { color: $editor-green-highlight; margin: 6px 0; }
++
++.mywork-scroll {
++  flex: 1;
++  min-height: 0;
++  overflow-y: auto;
++  -webkit-overflow-scrolling: touch;
++}
++
++.mywork-empty { padding: 24px 4px; text-align: center; }
++
++.mywork-heading {
++  font-size: 18px;
++  font-weight: bold;
++  color: $editor-modal-text-white;
++  margin: 6px 0 10px 0;
++}
++.mywork-subheading { margin-top: 18px; }
++
++.mywork-hint { font-size: 13px; margin: 6px 0; }
++
++.mywork-row {
++  display: flex;
++  align-items: center;
++  flex-wrap: wrap;
++  gap: 8px;
++  margin-bottom: 10px;
++  .mywork-heading { margin: 0; flex: 1; }
++}
++
++.mywork-input {
++  background: $editor-modal-dark;
++  color: $editor-modal-text-white;
++  border: 2px solid transparent;
++  border-radius: 8px;
++  padding: 8px 10px;
++  font-size: 16px;
++  min-width: 0;
++  &:focus { outline: none; border-color: $editor-green-highlight; }
++}
++.mywork-number { width: 70px; }
++.mywork-textarea { width: 100%; height: 70px; resize: vertical; font-family: inherit; }
++
++%mywork-button {
++  border: none;
++  border-radius: 8px;
++  font-weight: bold;
++  cursor: pointer;
++  &:disabled { opacity: 0.5; cursor: default; }
++}
++.mywork-primary {
++  @extend %mywork-button;
++  background: $editor-green-highlight;
++  color: $editor-primary;
++  padding: 9px 16px;
++  font-size: 16px;
++}
++.mywork-secondary {
++  @extend %mywork-button;
++  background: $editor-modal-dark;
++  color: $editor-modal-text-white;
++  padding: 9px 16px;
++  font-size: 16px;
++}
++.mywork-small {
++  @extend %mywork-button;
++  background: $editor-modal-dark;
++  color: $editor-modal-text-white;
++  padding: 6px 10px;
++  font-size: 13px;
++}
++.mywork-danger { color: #ff9d9d; }
++.mywork-confirm { background: #c0392b; color: #fff; }
++.mywork-link {
++  background: none;
++  border: none;
++  color: $editor-green-highlight;
++  font-size: 15px;
++  text-decoration: underline;
++  cursor: pointer;
++  padding: 6px 0;
++}
++.mywork-back {
++  background: none;
++  border: none;
++  color: $editor-modal-text-white;
++  font-size: 16px;
++  padding: 4px 0 8px 0;
++  cursor: pointer;
++}
++
++.mywork-file {
++  position: relative;
++  overflow: hidden;
++  margin: 0;
++  input { position: absolute; left: 0; top: 0; width: 100%; height: 100%; opacity: 0; cursor: pointer; }
++}
++.mywork-disabled { opacity: 0.5; pointer-events: none; }
++
++/* sign in */
++
++.mywork-class-list { display: flex; flex-direction: column; gap: 10px; max-width: 420px; }
++.mywork-class-button {
++  @extend %mywork-button;
++  background: $editor-modal-dark;
++  color: $editor-modal-text-white;
++  font-size: 20px;
++  padding: 16px;
++  text-align: left;
++}
++.mywork-teacher-link { margin-top: 18px; }
++
++.mywork-pic {
++  display: inline-flex;
++  align-items: center;
++  justify-content: center;
++  border-radius: 50%;
++  flex: none;
++  line-height: 1;
++}
++.mywork-pic-grid {
++  display: grid;
++  grid-template-columns: repeat(auto-fill, minmax(120px, 1fr));
++  gap: 10px;
++}
++.mywork-pic-button {
++  @extend %mywork-button;
++  background: $editor-modal-dark;
++  color: $editor-modal-text-white;
++  padding: 12px 6px;
++  display: flex;
++  flex-direction: column;
++  align-items: center;
++  gap: 6px;
++  font-size: 15px;
++}
++
++.mywork-center {
++  flex: 1;
++  display: flex;
++  flex-direction: column;
++  align-items: center;
++  overflow-y: auto;
++  .mywork-back { align-self: flex-start; }
++}
++.mywork-big-name { font-size: 22px; font-weight: bold; color: $editor-modal-text-white; margin: 6px 0; }
++.mywork-pin-dots { display: flex; gap: 14px; margin: 6px 0 14px 0; }
++.mywork-dot { width: 18px; height: 18px; border-radius: 50%; border: 2px solid $editor-modal-text-white; }
++.mywork-dot-on { background: $editor-green-highlight; border-color: $editor-green-highlight; }
++.mywork-keypad { display: grid; grid-template-columns: repeat(3, 76px); gap: 10px; }
++.mywork-key {
++  @extend %mywork-button;
++  height: 64px;
++  font-size: 28px;
++  background: $editor-modal-dark;
++  color: $editor-modal-text-white;
++  border-radius: 14px;
++  &:active { background: $editor-green-highlight; color: $editor-primary; }
++}
++
++.mywork-form { display: flex; flex-direction: column; gap: 10px; max-width: 380px; margin-bottom: 8px; }
++.mywork-code {
++  font-family: monospace;
++  font-size: 17px;
++  background: $editor-modal-dark;
++  color: $editor-modal-text-white;
++  padding: 10px;
++  border-radius: 8px;
++  user-select: all;
++  -webkit-user-select: all;
++  margin: 8px 0;
++  word-break: break-all;
++}
++
++/* signed in */
++
++.mywork-userbar {
++  display: flex;
++  align-items: center;
++  flex-wrap: wrap;
++  gap: 10px;
++  padding-bottom: 10px;
++  margin-bottom: 10px;
++  border-bottom: 1px solid $editor-modal-dark;
++}
++.mywork-username { color: $editor-modal-text-white; font-weight: bold; }
++.mywork-teacher-badge {
++  background: $editor-green-highlight;
++  color: $editor-primary;
++  font-weight: bold;
++  font-size: 13px;
++  border-radius: 6px;
++  padding: 3px 8px;
++}
++.mywork-signout { margin-left: auto; }
++.mywork-tabs { display: flex; gap: 6px; flex-wrap: wrap; }
++.mywork-tab {
++  @extend %mywork-button;
++  background: $editor-modal-dark;
++  color: $editor-modal-text-white;
++  border-radius: 16px;
++  padding: 6px 12px;
++  font-size: 14px;
++}
++.mywork-tab-active { background: $editor-green-highlight; color: $editor-primary; }
++
++.mywork-save-box {
++  display: flex;
++  flex-wrap: wrap;
++  gap: 8px;
++  margin-bottom: 12px;
++  .mywork-input { flex: 1; min-width: 180px; }
++}
++
++.mywork-grid {
++  display: grid;
++  grid-template-columns: repeat(auto-fill, minmax(170px, 1fr));
++  gap: 12px;
++}
++.mywork-card {
++  background: $editor-modal-dark;
++  border-radius: 10px;
++  padding: 8px;
++  display: flex;
++  flex-direction: column;
++  gap: 4px;
++}
++.mywork-thumb {
++  border: none;
++  padding: 0;
++  background: #fff;
++  border-radius: 6px;
++  aspect-ratio: 16 / 9;
++  overflow: hidden;
++  display: flex;
++  align-items: center;
++  justify-content: center;
++  font-size: 36px;
++  color: #999;
++  img { width: 100%; height: 100%; object-fit: contain; }
++}
++.mywork-card-title { color: $editor-modal-text-white; font-weight: bold; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
++.mywork-card-meta { font-size: 12px; }
++.mywork-card-actions { display: flex; gap: 6px; flex-wrap: wrap; }
++
++.mywork-split { flex: 1; min-height: 0; display: flex; gap: 14px; }
++.mywork-side {
++  width: 200px;
++  flex: none;
++  overflow-y: auto;
++  display: flex;
++  flex-direction: column;
++  gap: 6px;
++}
++.mywork-side-item {
++  @extend %mywork-button;
++  background: $editor-modal-dark;
++  color: $editor-modal-text-white;
++  padding: 10px;
++  text-align: left;
++  display: flex;
++  justify-content: space-between;
++  span { opacity: 0.6; font-weight: normal; }
++}
++.mywork-side-active { background: $editor-green-highlight; color: $editor-primary; }
++.mywork-new-class { display: flex; flex-direction: column; gap: 6px; margin-top: 8px; }
++.mywork-main { flex: 1; min-width: 0; }
++
++.mywork-students { display: flex; flex-direction: column; gap: 6px; }
++.mywork-student {
++  display: flex;
++  align-items: center;
++  gap: 10px;
++  background: $editor-modal-dark;
++  border-radius: 8px;
++  padding: 6px 10px;
++}
++.mywork-student-name { flex: 1; color: $editor-modal-text-white; }
++.mywork-student-pin { font-family: monospace; font-size: 18px; letter-spacing: 3px; color: $editor-modal-text-white; }
++
++.mywork-learn-form {
++  background: $editor-modal-dark;
++  border-radius: 10px;
++  padding: 12px;
++  display: flex;
++  flex-direction: column;
++  gap: 8px;
++  .mywork-input { background: $editor-primary; }
++  .mywork-heading { margin: 0; }
++}
++.mywork-chips { display: flex; flex-wrap: wrap; gap: 6px; }
++.mywork-chip {
++  @extend %mywork-button;
++  background: $editor-primary;
++  color: $editor-modal-text-white;
++  border-radius: 14px;
++  padding: 5px 10px;
++  font-size: 13px;
++  font-weight: normal;
++}
++.mywork-chip-on { background: $editor-green-highlight; color: $editor-primary; font-weight: bold; }
++.mywork-check { display: flex; align-items: center; gap: 8px; margin: 0; }
++
++.mywork-sound-list { display: flex; flex-direction: column; gap: 6px; }
++.mywork-sound {
++  display: flex;
++  align-items: center;
++  gap: 10px;
++  background: $editor-modal-dark;
++  border-radius: 8px;
++  padding: 6px 10px;
++}
++.mywork-sound-name { flex: 1; color: $editor-modal-text-white; }
++.mywork-play {
++  @extend %mywork-button;
++  width: 36px;
++  height: 36px;
++  border-radius: 50%;
++  background: $editor-green-highlight;
++  color: $editor-primary;
++}
++
++@media (max-width: 700px) {
++  .mywork-split { flex-direction: column; }
++  .mywork-side { width: 100%; max-height: 160px; }
++}
+diff --git a/src/Editor/Modals/SoundLibrary/SoundLibrary.jsx b/src/Editor/Modals/SoundLibrary/SoundLibrary.jsx
+new file mode 100644
+index 0000000..bf14777
+--- /dev/null
++++ b/src/Editor/Modals/SoundLibrary/SoundLibrary.jsx
+@@ -0,0 +1,197 @@
++/*
++ * Sound Effects: a library of sounds students can preview and drop onto their
++ * animation. It's the Sounds tab of the Builtin Library (the + button in the
++ * Asset Library). The list is fetched from /sounds/catalog.json. Students who
++ * are signed in also get "Class Sounds", which their teacher uploads.
++ *
++ * "Add" puts the sound on a layer named "Sounds" at the playhead, making the
++ * layer and a frame long enough for the sound if they don't exist yet.
++ *
++ * This file is part of a modified version of Wick Editor and is licensed
++ * under the GNU General Public License v3 or later.
++ */
++
++import React, { Component } from 'react';
++import cloud from 'cloud/cloud';
++
++import './_soundlibrary.scss';
++
++const CLASS_SOUNDS = 'Class Sounds';
++// A tiny silent WAV, played inside the tap so iPad Safari allows the real sound after it loads.
++const SILENCE = 'data:audio/wav;base64,UklGRiQAAABXQVZFZm10IBAAAAABAAEAQB8AAEAfAAABAAgAZGF0YQAAAAA=';
++
++class SoundLibrary extends Component {
++  constructor (props) {
++    super(props);
++    this.state = { catalog: null, error: false, category: null, playing: null, adding: null, classSounds: null, classError: false };
++    this.audio = null;
++    this.audioUrl = null;
++  }
++
++  static get ROOT () {
++    return process.env.PUBLIC_URL + '/sounds/';
++  }
++
++  componentDidMount () {
++    this.loadCatalog();
++    this.unsub = null;
++    cloud.enabled().then(on => {
++      if (on && !this.unmounted) this.unsub = cloud.onUserChange(user => this.loadClassSounds(user));
++    });
++  }
++
++  componentWillUnmount () {
++    this.unmounted = true;
++    this.stop();
++    if (this.unsub) this.unsub();
++  }
++
++  loadCatalog = () => {
++    fetch(SoundLibrary.ROOT + 'catalog.json?t=' + Date.now())
++      .then(resp => { if (!resp.ok) throw new Error('HTTP ' + resp.status); return resp.json(); })
++      .then(catalog => { if (!this.unmounted) this.setState({ catalog: catalog, error: false, category: this.state.category || (catalog.categories || [])[0] || null }); })
++      .catch(e => { console.error('SoundLibrary:', e); if (!this.unmounted) this.setState({ error: true }); });
++  }
++
++  loadClassSounds = (user) => {
++    if (this.unmounted) return;
++    if (!user || (user.role !== 'student' && user.role !== 'teacher')) {
++      this.setState({ classSounds: null, category: this.state.category === CLASS_SOUNDS ? null : this.state.category });
++      return;
++    }
++    cloud.listClassSounds()
++      .then(list => { if (!this.unmounted) this.setState({ classSounds: list, classError: false }); })
++      .catch(e => { console.error('Class sounds:', e); if (!this.unmounted) this.setState({ classSounds: [], classError: true }); });
++  }
++
++  categories = () => {
++    let cats = (this.state.catalog && this.state.catalog.categories) || [];
++    return this.state.classSounds ? [CLASS_SOUNDS].concat(cats) : cats;
++  }
++
++  key = (sound) => sound.id ? 'class:' + sound.id : sound.file;
++
++  // Class sounds come from the save server; everything else is a file on this site.
++  getBlob = (sound) => {
++    if (sound.id) return cloud.loadClassSound(sound.id);
++    return fetch(SoundLibrary.ROOT + sound.file).then(resp => { if (!resp.ok) throw new Error('HTTP ' + resp.status); return resp.blob(); });
++  }
++
++  stop = () => {
++    this.playingKey = null;
++    if (this.audio) { this.audio.pause(); this.audio = null; }
++    if (this.audioUrl) { URL.revokeObjectURL(this.audioUrl); this.audioUrl = null; }
++    if (this.state.playing && !this.unmounted) this.setState({ playing: null });
++  }
++
++  togglePlay = (sound) => {
++    let k = this.key(sound);
++    if (this.playingKey === k) { this.stop(); return; }
++    this.stop();
++    // The audio element is made and started inside the tap itself: iPad Safari only
++    // lets sound start from a tap, and only on an element the tap already played.
++    let audio = new Audio();
++    this.audio = audio;
++    this.playingKey = k;
++    this.setState({ playing: k });
++    let real = !sound.id;
++    audio.onended = () => { if (real && this.audio === audio) this.stop(); };
++    let play = () => {
++      let p = audio.play();
++      if (p && p.catch) p.catch(e => {
++        if (e && e.name === 'AbortError') return; // a newer load replaced this one
++        console.error('Sound preview:', e);
++        if (this.audio === audio) this.stop();
++      });
++    };
++    if (sound.id) {
++      audio.src = SILENCE;
++      let p = audio.play();
++      if (p && p.catch) p.catch(() => {});
++      this.getBlob(sound).then(blob => {
++        if (this.audio !== audio) return;
++        this.audioUrl = URL.createObjectURL(blob);
++        real = true;
++        audio.src = this.audioUrl;
++        play();
++      }).catch(() => { if (this.audio === audio) this.stop(); });
++    } else {
++      audio.src = SoundLibrary.ROOT + sound.file;
++      play();
++    }
++  }
++
++  add = (sound) => {
++    if (this.state.adding) return;
++    let k = this.key(sound);
++    this.setState({ adding: k });
++    this.getBlob(sound)
++      .then(blob => {
++        let type = blob.type || sound.type || 'audio/mpeg';
++        let ext = sound.file ? sound.file.split('.').pop() : (/wav/.test(type) ? 'wav' : /ogg/.test(type) ? 'ogg' : /mp4|m4a|aac/.test(type) ? 'm4a' : 'mp3');
++        let filename = sound.file ? sound.file.split('/').pop() : sound.name.replace(/[^\w\- ]+/g, '').trim().replace(/\s+/g, '-').toLowerCase() + '.' + ext;
++        let file = new File([blob], filename, { type: type });
++        this.props.addLibrarySound(file, sound.name, sound.seconds || 1);
++      })
++      .catch(e => {
++        console.error('SoundLibrary add:', e);
++        this.props.toast('Could not download that sound. Check your internet connection.', 'error');
++      })
++      .then(() => { if (!this.unmounted) this.setState({ adding: null }); });
++  }
++
++  renderSound = (sound) => {
++    let k = this.key(sound);
++    let playing = this.state.playing === k;
++    let adding = this.state.adding === k;
++    return (
++      <div key={k} className={'sound-lib-item' + (playing ? ' sound-lib-item-playing' : '')}>
++        <button className='sound-lib-play' aria-label={(playing ? 'Stop ' : 'Play ') + sound.name} onClick={() => this.togglePlay(sound)}>
++          {playing ? '■' : '▶'}
++        </button>
++        <div className='sound-lib-name' onClick={() => this.togglePlay(sound)}>
++          {sound.name}
++          <span className='sound-lib-length'>{sound.seconds < 1 ? 'short' : Math.round(sound.seconds) + 's'}</span>
++        </div>
++        <button className='sound-lib-add' disabled={adding} onClick={() => this.add(sound)}>
++          {adding ? '...' : 'Add'}
++        </button>
++      </div>
++    );
++  }
++
++  renderList = () => {
++    let { catalog, classSounds, classError } = this.state;
++    let category = this.state.category || this.categories()[0];
++    if (category === CLASS_SOUNDS) {
++      if (classError) return <div className='sound-lib-empty'>Couldn't load Class Sounds. Check the Wi-Fi and try again.</div>;
++      if (!classSounds || classSounds.length === 0) return <div className='sound-lib-empty'>Your teacher hasn't added any class sounds yet.</div>;
++      return <div className='sound-lib-list'>{classSounds.map(this.renderSound)}</div>;
++    }
++    return <div className='sound-lib-list'>{catalog.sounds.filter(s => s.category === category).map(this.renderSound)}</div>;
++  }
++
++  render () {
++    let { catalog, error, category } = this.state;
++    return (
++      <div className='sound-lib'>
++        <div className='sound-lib-hint'>Move the playhead to where the sound should start, then tap Add.</div>
++        {error && <div className='sound-lib-empty'>Couldn't load the sounds. Check your internet connection and try again.</div>}
++        {!error && !catalog && <div className='sound-lib-empty'>Loading...</div>}
++        {!error && catalog &&
++          <React.Fragment>
++            <div className='sound-lib-categories'>
++              {this.categories().map(c =>
++                <button key={c} className={'sound-lib-category' + (c === (category || this.categories()[0]) ? ' sound-lib-category-active' : '') + (c === CLASS_SOUNDS ? ' sound-lib-category-class' : '')}
++                  onClick={() => { this.stop(); this.setState({ category: c }); }}>
++                  {c}
++                </button>)}
++            </div>
++            {this.renderList()}
++          </React.Fragment>}
++      </div>
++    );
++  }
++}
++
++export default SoundLibrary;
+diff --git a/src/Editor/Modals/SoundLibrary/_soundlibrary.scss b/src/Editor/Modals/SoundLibrary/_soundlibrary.scss
+new file mode 100644
+index 0000000..f320032
+--- /dev/null
++++ b/src/Editor/Modals/SoundLibrary/_soundlibrary.scss
+@@ -0,0 +1,156 @@
++@import 'Editor/_wickbrand.scss';
++
++.sound-lib-modal-body {
++  width: 760px;
++  height: 580px;
++  max-width: 94vw;
++  max-height: 88vh;
++  padding: 0px;
++}
++
++.sound-lib {
++  width: 100%;
++  height: 100%;
++  padding: 4px 0 0 0;
++  display: flex;
++  flex-direction: column;
++  text-align: left;
++  color: $editor-modal-text-gray;
++}
++
++.sound-lib-title {
++  font-size: 20px;
++  font-weight: bold;
++  color: $editor-modal-text-white;
++  padding-right: 36px;
++}
++
++.sound-lib-hint {
++  font-size: 14px;
++  margin: 4px 0 12px 0;
++}
++
++.sound-lib-categories {
++  display: flex;
++  flex-wrap: wrap;
++  margin-bottom: 10px;
++}
++
++.sound-lib-category {
++  border: none;
++  background: $editor-modal-dark;
++  color: $editor-modal-text-white;
++  font-size: 15px;
++  font-weight: bold;
++  padding: 8px 14px;
++  margin: 0 8px 8px 0;
++  border-radius: 18px;
++  cursor: pointer;
++}
++
++.sound-lib-category-active {
++  background: $editor-green-highlight;
++  color: $editor-primary;
++}
++
++.sound-lib-list {
++  flex: 1;
++  overflow-y: auto;
++  -webkit-overflow-scrolling: touch;
++  display: grid;
++  grid-template-columns: repeat(auto-fill, minmax(220px, 1fr));
++  grid-gap: 8px;
++  align-content: start;
++  padding-right: 4px;
++}
++
++.sound-lib-item {
++  display: flex;
++  align-items: center;
++  background: $editor-modal-dark;
++  border-radius: 10px;
++  padding: 6px;
++  border: 2px solid transparent;
++}
++
++.sound-lib-item-playing {
++  border-color: $editor-green-highlight;
++}
++
++.sound-lib-play {
++  flex: none;
++  width: 44px;
++  height: 44px;
++  border-radius: 50%;
++  border: none;
++  background: $editor-green-highlight;
++  color: $editor-primary;
++  font-size: 16px;
++  cursor: pointer;
++}
++
++.sound-lib-name {
++  flex: 1;
++  color: $editor-modal-text-white;
++  font-size: 15px;
++  padding: 0 8px;
++  cursor: pointer;
++  line-height: 1.2;
++}
++
++.sound-lib-length {
++  display: block;
++  font-size: 12px;
++  color: $editor-modal-text-gray;
++}
++
++.sound-lib-add {
++  flex: none;
++  height: 40px;
++  padding: 0 14px;
++  border-radius: 8px;
++  border: 2px solid $editor-green-highlight;
++  background: transparent;
++  color: $editor-green-highlight;
++  font-weight: bold;
++  font-size: 15px;
++  cursor: pointer;
++}
++
++.sound-lib-add:disabled {
++  opacity: 0.5;
++}
++
++.sound-lib-empty {
++  padding: 40px 0;
++  text-align: center;
++  font-size: 16px;
++}
++
++.sound-lib-category-class {
++  border: 2px solid $editor-green-highlight;
++}
++
++/* The Builtin Library (Asset Library + button) uses the sound panel's size. */
++.builtin-library-modal .builtin-library {
++  display: flex;
++  flex-direction: column;
++  padding: 18px 20px 12px 20px;
++}
++.builtin-library-modal .tabbed-interface {
++  flex: 1;
++  min-height: 0;
++  display: flex;
++  flex-direction: column;
++}
++.builtin-library-modal .tabbed-interface-body {
++  flex: 1;
++  min-height: 0;
++  height: auto;
++  overflow: hidden;
++}
++.builtin-library-modal .builtin-library-asset-grid {
++  height: 100%;
++  overflow-y: auto;
++  -webkit-overflow-scrolling: touch;
++}
 diff --git a/src/Editor/Panels/MenuBar/MenuBar.jsx b/src/Editor/Panels/MenuBar/MenuBar.jsx
-index 907061f..5775b32 100644
+index 907061f..379ac2f 100644
 --- a/src/Editor/Panels/MenuBar/MenuBar.jsx
 +++ b/src/Editor/Panels/MenuBar/MenuBar.jsx
-@@ -50,6 +50,11 @@ class MenuBar extends Component {
+@@ -22,8 +22,19 @@ import './_menubar.scss';
+ import MenuBarButton from './MenuBarButton/MenuBarButton';
+ import MenuBarIconButton from './MenuBarIconButton/MenuBarIconButton';
+ import MenuBarSupportButton from './MenuBarSupportButton/MenuBarSupportButton';
++import cloud from 'cloud/cloud';
+ 
+ class MenuBar extends Component {
++  constructor (props) {
++    super(props);
++    this.state = { cloud: false };
++  }
++
++  componentDidMount () {
++    // Show "my work" only when online saving is set up for this site.
++    cloud.enabled().then(on => { if (on) this.setState({ cloud: true }); });
++  }
++
+ 
+   renderDesktop = () => {
+     return(
+@@ -50,6 +61,16 @@ class MenuBar extends Component {
  
          <div className="menu-bar-actions-container">
  
@@ -702,11 +4619,16 @@ index 907061f..5775b32 100644
 +            text="learn"
 +            action={() => this.props.openModal('Learn')}
 +          />
++          {this.state.cloud &&
++            <MenuBarButton
++              text="my work"
++              action={() => this.props.openModal('MyWork')}
++            />}
 +
            <MenuBarButton
              text="new"
              action={this.props.openNewProjectConfirmation}
-@@ -98,6 +103,10 @@ class MenuBar extends Component {
+@@ -98,6 +119,15 @@ class MenuBar extends Component {
          </div>
  
          <div className="menu-bar-actions-container">
@@ -714,9 +4636,380 @@ index 907061f..5775b32 100644
 +            text="learn"
 +            action={() => this.props.openModal('Learn')}
 +          />
++          {this.state.cloud &&
++            <MenuBarButton
++              text="my work"
++              action={() => this.props.openModal('MyWork')}
++            />}
            <MenuBarButton
              text="save"
              action={this.props.exportProjectAsWickFile}
+diff --git a/src/Editor/Panels/Toolbox/ArtLayerSwitch/ArtLayerSwitch.jsx b/src/Editor/Panels/Toolbox/ArtLayerSwitch/ArtLayerSwitch.jsx
+new file mode 100644
+index 0000000..a80b282
+--- /dev/null
++++ b/src/Editor/Panels/Toolbox/ArtLayerSwitch/ArtLayerSwitch.jsx
+@@ -0,0 +1,92 @@
++/*
++ * Line / Color art switch for the toolbox.
++ * Picks which art layer new strokes go into, and shows or hides each kind on the canvas.
++ *
++ * This file is part of a modified version of Wick Editor and is licensed
++ * under the GNU General Public License v3 or later.
++ */
++
++import React, { Component } from 'react';
++import './_artlayerswitch.scss';
++
++const EyeIcon = ({ open }) => (
++  <svg viewBox="0 0 24 24" width="18" height="18" aria-hidden="true">
++    <path d="M1.5 12S5.5 5 12 5s10.5 7 10.5 7-4 7-10.5 7S1.5 12 1.5 12z" fill="none" stroke="currentColor" strokeWidth="2" strokeLinejoin="round"/>
++    <circle cx="12" cy="12" r="3.2" fill="currentColor"/>
++    {!open && <line x1="3" y1="21" x2="21" y2="3" stroke="currentColor" strokeWidth="2.4" strokeLinecap="round"/>}
++  </svg>
++);
++
++const LineIcon = () => (
++  <svg viewBox="0 0 24 24" width="18" height="18" aria-hidden="true">
++    <path d="M3 17c3-1 4-8 7-8s2 7 5 7 4-6 6-7" fill="none" stroke="currentColor" strokeWidth="2.4" strokeLinecap="round"/>
++  </svg>
++);
++
++const ColorIcon = () => (
++  <svg viewBox="0 0 24 24" width="18" height="18" aria-hidden="true">
++    <path d="M12 3c3.5 4.5 6 7.6 6 10.5A6 6 0 0 1 6 13.5C6 10.6 8.5 7.5 12 3z" fill="currentColor"/>
++  </svg>
++);
++
++class ArtLayerSwitch extends Component {
++  constructor (props) {
++    super(props);
++    this.state = this.readVisibility();
++  }
++
++  readVisibility () {
++    let art = window.Wick && window.Wick.ArtLayers;
++    return {
++      showLine: art ? art.showLine : true,
++      showColor: art ? art.showColor : true,
++    };
++  }
++
++  componentDidMount () {
++    if (window.Wick && window.Wick.ArtLayers) {
++      this.unsubscribe = window.Wick.ArtLayers.subscribe(() => this.setState(this.readVisibility()));
++    }
++  }
++
++  componentWillUnmount () {
++    if (this.unsubscribe) this.unsubscribe();
++  }
++
++  toggle = (type, e) => {
++    e.stopPropagation();
++    let visible = type === 'line' ? this.state.showLine : this.state.showColor;
++    window.Wick.ArtLayers.setVisible(type, !visible);
++  }
++
++  renderSegment = (type, label, Icon) => {
++    let active = (this.props.getToolSetting('artLayer') || 'line') === type;
++    let visible = type === 'line' ? this.state.showLine : this.state.showColor;
++    return (
++      <div
++        className={'art-layer-segment' + (active ? ' art-layer-segment-active' : '') + (visible ? '' : ' art-layer-segment-hidden')}
++        role='button'
++        title={'Draw on ' + label + ' Art'}
++        onClick={() => this.props.setToolSetting('artLayer', type)}>
++        <span className='art-layer-label'><Icon/>{label}</span>
++        <button
++          className='art-layer-eye'
++          title={(visible ? 'Hide ' : 'Show ') + label + ' Art'}
++          onClick={(e) => this.toggle(type, e)}>
++          <EyeIcon open={visible}/>
++        </button>
++      </div>
++    );
++  }
++
++  render () {
++    return (
++      <div className='art-layer-switch'>
++        {this.renderSegment('line', 'Line', LineIcon)}
++        {this.renderSegment('color', 'Color', ColorIcon)}
++      </div>
++    );
++  }
++}
++
++export default ArtLayerSwitch;
+diff --git a/src/Editor/Panels/Toolbox/ArtLayerSwitch/_artlayerswitch.scss b/src/Editor/Panels/Toolbox/ArtLayerSwitch/_artlayerswitch.scss
+new file mode 100644
+index 0000000..3297c87
+--- /dev/null
++++ b/src/Editor/Panels/Toolbox/ArtLayerSwitch/_artlayerswitch.scss
+@@ -0,0 +1,95 @@
++@import 'Editor/_wickbrand.scss';
++
++.art-layer-switch {
++  display: flex;
++  align-items: center;
++  height: 34px;
++  margin: 0 6px;
++  padding: 2px;
++  border-radius: 9px;
++  background: $editor-modal-dark;
++  flex-shrink: 0;
++}
++
++.art-layer-segment {
++  display: flex;
++  align-items: center;
++  height: 100%;
++  padding: 0 2px 0 9px;
++  border-radius: 7px;
++  color: $editor-modal-text-dark;
++  font-size: 14px;
++  font-weight: bold;
++  cursor: pointer;
++  user-select: none;
++  -webkit-user-select: none;
++
++  svg { display: block; }
++}
++
++.art-layer-label {
++  display: flex;
++  align-items: center;
++
++  svg { margin-right: 4px; }
++}
++
++.art-layer-segment-active {
++  background: $editor-green-highlight;
++  color: $editor-primary;
++}
++
++.art-layer-segment-hidden .art-layer-label {
++  opacity: 0.45;
++}
++
++.art-layer-eye {
++  display: flex;
++  align-items: center;
++  justify-content: center;
++  width: 30px;
++  height: 30px;
++  margin-left: 2px;
++  border: none;
++  border-radius: 6px;
++  background: transparent;
++  color: inherit;
++  cursor: pointer;
++  padding: 0;
++}
++
++.bucket-fills-color-toggle {
++  display: flex;
++  align-items: center;
++  height: 30px;
++  margin-left: 8px;
++  padding: 0 10px 0 6px;
++  border-radius: 8px;
++  background: $editor-modal-dark;
++  color: $editor-modal-text-gray;
++  font-size: 13px;
++  font-weight: bold;
++  cursor: pointer;
++  user-select: none;
++  -webkit-user-select: none;
++  white-space: nowrap;
++}
++
++.bucket-fills-color-box {
++  display: inline-flex;
++  align-items: center;
++  justify-content: center;
++  width: 18px;
++  height: 18px;
++  margin-right: 6px;
++  border-radius: 4px;
++  border: 2px solid $editor-modal-text-gray;
++  font-size: 13px;
++  line-height: 1;
++}
++
++.bucket-fills-color-on .bucket-fills-color-box {
++  background: $editor-green-highlight;
++  border-color: $editor-green-highlight;
++  color: $editor-primary;
++}
+diff --git a/src/Editor/Panels/Toolbox/ToolSettings/ToolSettings.jsx b/src/Editor/Panels/Toolbox/ToolSettings/ToolSettings.jsx
+index 96051eb..b583cda 100644
+--- a/src/Editor/Panels/Toolbox/ToolSettings/ToolSettings.jsx
++++ b/src/Editor/Panels/Toolbox/ToolSettings/ToolSettings.jsx
+@@ -28,6 +28,10 @@ class ToolSettings extends Component {
+   constructor(props) {
+     super(props);
+ 
++    this.state = {
++      showBrushTextures: false,
++    };
++
+     this.settingsFunctions = {
+       "cursor": this.renderCursorSettings,
+       "brush": this.renderBrushSettings,
+@@ -74,6 +78,7 @@ class ToolSettings extends Component {
+         {this.renderEnablePressure()}
+         {this.renderEnableRelativeBrushSize()}
+         {this.renderBrushMode()}
++        {this.renderBrushTexture()}
+       </div>
+     );
+   }
+@@ -131,6 +136,21 @@ class ToolSettings extends Component {
+     return (
+       <div className='settings-input-container'>
+         {this.renderGapFillAmount()}
++        {this.renderBucketFillsColor()}
++      </div>
++    );
++  }
++
++  renderBucketFillsColor = () => {
++    let on = this.getToolSetting('bucketFillsColor');
++    return (
++      <div
++        className={'bucket-fills-color-toggle' + (on ? ' bucket-fills-color-on' : '')}
++        role='button'
++        title='When on, the fill bucket always paints into Color Art, under your lines'
++        onClick={() => this.setToolSetting('bucketFillsColor', !on)}>
++        <span className='bucket-fills-color-box'>{on ? '\u2713' : ''}</span>
++        Fill into Color Art
+       </div>
+     );
+   }
+@@ -208,6 +228,57 @@ class ToolSettings extends Component {
+     )
+   }
+ 
++  toggleBrushTextures = (state) => {
++    this.setState({
++      showBrushTextures: typeof state === 'boolean' ? state : !this.state.showBrushTextures,
++    });
++  }
++
++  renderBrushTexture = () => {
++    let textures = [
++      {name: 'Smooth', value: 'none'},
++      {name: 'Crayon', value: 'crayon'},
++      {name: 'Chalk', value: 'chalk'},
++      {name: 'Charcoal', value: 'charcoal'},
++      {name: 'Spray', value: 'spray'},
++    ];
++    let current = this.props.getToolSetting('brushTexture') || 'none';
++
++    return (
++        <div id="brush-textures-popover-button">
++          <ToolSettingsInput renderSize={this.props.renderSize}
++            name='Brush Texture'
++            icon={'brushtexture' + current}
++            type='checkbox'
++            value={this.state.showBrushTextures}
++            onChange={() => this.toggleBrushTextures()}/>
++          <PopupMenu
++            mobile={this.props.isMobile}
++            isOpen={this.state.showBrushTextures && !this.props.previewPlaying}
++            toggle={() => this.toggleBrushTextures(false)}
++            target="brush-textures-popover-button"
++            className={"more-canvas-actions-popover"}>
++            <div className="brush-modes-widget">
++              <div className='actions-container'>
++                {textures.map(texture =>
++                  <ToolSettingsInput renderSize={this.props.renderSize}
++                    key={texture.value}
++                    name={texture.name}
++                    icon={'brushtexture' + texture.value}
++                    type='checkbox'
++                    value={current === texture.value}
++                    onChange={() => {
++                      this.props.setToolSetting('brushTexture', texture.value);
++                      this.toggleBrushTextures(false);
++                    }}/>
++                )}
++              </div>
++            </div>
++          </PopupMenu>
++        </div>
++    )
++  }
++
+   renderCornerRadius = () => {
+     return (
+       <ToolSettingsInput renderSize={this.props.renderSize}
+diff --git a/src/Editor/Panels/Toolbox/Toolbox.jsx b/src/Editor/Panels/Toolbox/Toolbox.jsx
+index 8aae041..a21ae96 100644
+--- a/src/Editor/Panels/Toolbox/Toolbox.jsx
++++ b/src/Editor/Panels/Toolbox/Toolbox.jsx
+@@ -24,6 +24,7 @@ import 'bootstrap/dist/css/bootstrap.min.css';
+ import WickInput from 'Editor/Util/WickInput/WickInput';
+ import ToolboxBreak from './ToolboxBreak/ToolboxBreak';
+ import ToolButton from './ToolButton/ToolButton';
++import ArtLayerSwitch from './ArtLayerSwitch/ArtLayerSwitch';
+ import ToolSettings from './ToolSettings/ToolSettings';
+ import CanvasActions from './CanvasActions/CanvasActions';
+ import PopupMenu from 'Editor/Util/PopupMenu/PopupMenu';
+@@ -170,6 +171,7 @@ class Toolbox extends Component {
+         <ToolboxBreak/>
+ 
+         {this.renderColorPickers()}
++          <ArtLayerSwitch getToolSetting={this.props.getToolSetting} setToolSetting={this.props.setToolSetting}/>
+ 
+         <ToolboxBreak/>
+ 
+@@ -196,6 +198,7 @@ class Toolbox extends Component {
+           {this.renderToolButtons()}
+           <ToolboxBreak/>
+           {this.renderColorPickers()}
++          <ArtLayerSwitch getToolSetting={this.props.getToolSetting} setToolSetting={this.props.setToolSetting}/>
+           <ToolboxBreak/>
+         </div>
+         <div className="medium-toolbox-row">
+@@ -224,6 +227,7 @@ class Toolbox extends Component {
+         </div>
+         <div className="medium-toolbox-row">
+           {this.renderColorPickers()}
++          <ArtLayerSwitch getToolSetting={this.props.getToolSetting} setToolSetting={this.props.setToolSetting}/>
+           <ToolboxBreak className={classNames("toolbox-break", "mobile")}/>
+           <ToolSettings renderSize={this.props.renderSize}
+             isMobile={true}
+diff --git a/src/Editor/Util/ToolIcon/ToolIcon.jsx b/src/Editor/Util/ToolIcon/ToolIcon.jsx
+index 1ff89a2..887141f 100644
+--- a/src/Editor/Util/ToolIcon/ToolIcon.jsx
++++ b/src/Editor/Util/ToolIcon/ToolIcon.jsx
+@@ -54,6 +54,11 @@ import iconRelativeBrushSize from 'resources/tool-icons/relativebrush.png';
+ import iconBrushModeNone from 'resources/tool-icons/brush-mode-none.png';
+ import iconBrushModeInside from 'resources/tool-icons/brush-mode-inside.png';
+ import iconBrushModeOutside from 'resources/tool-icons/brush-mode-outside.png';
++import iconBrushTextureNone from 'resources/tool-icons/brush-texture-none.png';
++import iconBrushTextureCrayon from 'resources/tool-icons/brush-texture-crayon.png';
++import iconBrushTextureChalk from 'resources/tool-icons/brush-texture-chalk.png';
++import iconBrushTextureCharcoal from 'resources/tool-icons/brush-texture-charcoal.png';
++import iconBrushTextureSpray from 'resources/tool-icons/brush-texture-spray.png';
+ 
+ // Actions
+ import iconAction from 'resources/tool-icons/action.svg';
+@@ -291,6 +296,11 @@ const icons = {
+   "brushmodenone": iconBrushModeNone,
+   "brushmodeinside": iconBrushModeInside,
+   "brushmodeoutside": iconBrushModeOutside,
++  "brushtexturenone": iconBrushTextureNone,
++  "brushtexturecrayon": iconBrushTextureCrayon,
++  "brushtexturechalk": iconBrushTextureChalk,
++  "brushtexturecharcoal": iconBrushTextureCharcoal,
++  "brushtexturespray": iconBrushTextureSpray,
+   "outliner": iconOutliner,
+   "play": iconPlay,
+   "pause": iconPause,
 diff --git a/src/Editor/Util/WickInput/WickButton/WickButton.jsx b/src/Editor/Util/WickInput/WickButton/WickButton.jsx
 index 6c1b02e..f440557 100644
 --- a/src/Editor/Util/WickInput/WickButton/WickButton.jsx
@@ -740,6 +5033,437 @@ index 6c1b02e..f440557 100644
        className={classNames("wick-button ", props.className)}>
        {props.children}
      </button>
+diff --git a/src/cloud/cloud.js b/src/cloud/cloud.js
+new file mode 100644
+index 0000000..9785ff0
+--- /dev/null
++++ b/src/cloud/cloud.js
+@@ -0,0 +1,425 @@
++/*
++ * Cloud saves, student logins and Learn publishing, backed by Firebase
++ * (Authentication + Cloud Firestore, both on the free Spark plan).
++ *
++ * Nothing here runs unless /cloud-config.json exists and has a projectId.
++ * Firebase's browser SDK is self-hosted in /corelibs/firebase so the only
++ * outside addresses are Google's API hosts.
++ *
++ * Data layout (see firestore.rules in the site repo):
++ *   teachers/{uid}            exists = this account is a teacher (added by hand in the Firebase console)
++ *   classes/{classId}         { name, students: [{ label, email }] }   readable by anyone (no names, just "Blue Fox")
++ *   classSecrets/{classId}    { pins: { label: pin } }                  teacher only, so cards can be reprinted
++ *   students/{uid}            { classId, label }
++ *   projects/{id}             { owner, classId, label, title, thumb, version, chunkCount, size, updatedAt }
++ *   projects/{id}/chunks/{v_i}{ data }   the .wick file as base64, split to fit Firestore's 1 MB document limit
++ *   learn/{id}                { title, description, principles, tags, preview, version, chunkCount, order, updatedAt }
++ *   learn/{id}/chunks/{v_i}   { data }
++ *   classSounds/{id}          { name, seconds, type, version, chunkCount }   signed-in users read, teacher writes
++ *   classSounds/{id}/chunks/{v_i} { data }
++ *
++ * This file is part of a modified version of Wick Editor and is licensed
++ * under the GNU General Public License v3 or later.
++ */
++
++const CHUNK = 700000;          // characters of base64 per chunk document
++const MAX_BYTES = 15 * 1024 * 1024;
++const STUDENT_DOMAIN = 'student.animate.invalid';
++
++const COLORS = ['Red', 'Orange', 'Yellow', 'Green', 'Blue', 'Purple', 'Pink', 'Silver'];
++const ANIMALS = [
++  ['Fox', '\u{1F98A}'], ['Cat', '\u{1F431}'], ['Dog', '\u{1F436}'], ['Frog', '\u{1F438}'], ['Owl', '\u{1F989}'],
++  ['Bear', '\u{1F43B}'], ['Lion', '\u{1F981}'], ['Tiger', '\u{1F42F}'], ['Panda', '\u{1F43C}'], ['Koala', '\u{1F428}'],
++  ['Monkey', '\u{1F435}'], ['Rabbit', '\u{1F430}'], ['Penguin', '\u{1F427}'], ['Turtle', '\u{1F422}'], ['Octopus', '\u{1F419}'],
++  ['Whale', '\u{1F433}'], ['Dragon', '\u{1F409}'], ['Unicorn', '\u{1F984}'], ['Bee', '\u{1F41D}'], ['Snail', '\u{1F40C}'],
++  ['Shark', '\u{1F988}'], ['Parrot', '\u{1F99C}'], ['Hedgehog', '\u{1F994}'], ['Crab', '\u{1F980}'],
++];
++const COLOR_HEX = { Red: '#ff6b6b', Orange: '#ffa94d', Yellow: '#ffd43b', Green: '#69db7c', Blue: '#4dabf7', Purple: '#b197fc', Pink: '#f783ac', Silver: '#ced4da' };
++
++let configPromise = null;
++let sdkPromise = null;
++let app = null, auth = null, db = null, cloudConfig = null;
++let currentUser = null;           // { uid, role, classId, label, email }
++let ready = false;
++const listeners = new Set();
++
++function publicUrl () { return process.env.PUBLIC_URL || ''; }
++
++function loadScript (src) {
++  return new Promise((resolve, reject) => {
++    let s = document.createElement('script');
++    s.src = src; s.async = true;
++    s.onload = resolve;
++    s.onerror = () => reject(new Error('Could not load ' + src));
++    document.head.appendChild(s);
++  });
++}
++
++function getConfig () {
++  if (!configPromise) {
++    if (window.__cloudBackendOverride) return Promise.resolve({ override: true });
++    configPromise = fetch(publicUrl() + '/cloud-config.json?t=' + Date.now())
++      .then(r => (r.ok ? r.json() : null))
++      .then(c => (c && c.projectId && c.apiKey ? c : null))
++      .catch(() => null);
++  }
++  return configPromise;
++}
++
++function init () {
++  if (sdkPromise) return sdkPromise;
++  sdkPromise = getConfig().then(config => {
++    if (!config) return false;
++    if (config.override) return true;
++    let base = publicUrl() + '/corelibs/firebase/';
++    return loadScript(base + 'firebase-app-compat.js')
++      .then(() => Promise.all([loadScript(base + 'firebase-auth-compat.js'), loadScript(base + 'firebase-firestore-compat.js')]))
++      .then(() => {
++        let fb = window.firebase;
++        cloudConfig = config;
++        app = fb.initializeApp(config);
++        auth = app.auth();
++        db = app.firestore();
++        if (config.authEmulator) auth.useEmulator(config.authEmulator);
++        if (config.firestoreEmulator) { let [h, p] = config.firestoreEmulator.split(':'); db.useEmulator(h, Number(p)); }
++        // Long polling is more reliable than WebChannel streaming on filtered school networks.
++        try { db.settings({ experimentalAutoDetectLongPolling: true, merge: true }); } catch (e) { /* settings already applied */ }
++        return new Promise(resolve => {
++          auth.onAuthStateChanged(user => {
++            describeUser(user).then(u => {
++              currentUser = u; ready = true;
++              listeners.forEach(cb => cb(currentUser));
++              resolve(true);
++            });
++          });
++        });
++      });
++  }).catch(e => { console.error('cloud init failed', e); return false; });
++  return sdkPromise;
++}
++
++function B () { return window.__cloudBackendOverride; }
++
++function describeUser (user) {
++  if (!user) return Promise.resolve(null);
++  return Promise.all([
++    db.collection('teachers').doc(user.uid).get().catch(() => null),
++    db.collection('students').doc(user.uid).get().catch(() => null),
++  ]).then(([t, s]) => {
++    if (t && t.exists) return { uid: user.uid, role: 'teacher', email: user.email, label: 'Teacher' };
++    if (s && s.exists) return Object.assign({ uid: user.uid, role: 'student' }, s.data());
++    return { uid: user.uid, role: 'none', email: user.email };
++  });
++}
++
++/* ---------- helpers ---------- */
++
++function slug (s) { return String(s).toLowerCase().replace(/[^a-z0-9]+/g, '-').replace(/^-|-$/g, ''); }
++function randomId (n) {
++  let chars = 'abcdefghijkmnpqrstuvwxyz23456789', out = '';
++  let bytes = new Uint8Array(n); window.crypto.getRandomValues(bytes);
++  for (let i = 0; i < n; i++) out += chars[bytes[i] % chars.length];
++  return out;
++}
++function randomPin () {
++  let b = new Uint32Array(1); window.crypto.getRandomValues(b);
++  return String(b[0] % 10000).padStart(4, '0');
++}
++function passwordFor (label, pin) { return 'wick-' + pin + '-' + slug(label); }
++
++function blobToBase64 (blob) {
++  return new Promise((resolve, reject) => {
++    let r = new FileReader();
++    r.onload = () => resolve(String(r.result).split(',')[1] || '');
++    r.onerror = reject;
++    r.readAsDataURL(blob);
++  });
++}
++function base64ToBlob (b64, type) {
++  let bin = atob(b64), bytes = new Uint8Array(bin.length);
++  for (let i = 0; i < bin.length; i++) bytes[i] = bin.charCodeAt(i);
++  return new Blob([bytes], { type: type || 'application/zip' });
++}
++
++// Write a file as versioned chunks under docRef/chunks, then point the meta doc at the new version,
++// then remove the previous version's chunks. A failed upload leaves the old version intact.
++async function writeChunked (docRef, meta, blob) {
++  if (blob.size > MAX_BYTES) throw new Error('too-big');
++  let b64 = await blobToBase64(blob);
++  let version = randomId(6);
++  let pieces = [];
++  for (let i = 0; i < b64.length; i += CHUNK) pieces.push(b64.slice(i, i + CHUNK));
++  let old = await docRef.get();
++  let oldVersion = old.exists ? old.data().version : null;
++  let oldCount = old.exists ? old.data().chunkCount || 0 : 0;
++  // Meta first (rules check the parent doc when writing chunks).
++  let firstMeta = Object.assign({}, meta, { updatedAt: window.firebase.firestore.FieldValue.serverTimestamp() });
++  if (!old.exists) Object.assign(firstMeta, { version: null, chunkCount: 0 });
++  await docRef.set(firstMeta, { merge: true });
++  for (let i = 0; i < pieces.length; i++) {
++    await docRef.collection('chunks').doc(version + '_' + i).set({ data: pieces[i] });
++  }
++  await docRef.set({ version: version, chunkCount: pieces.length, size: blob.size, updatedAt: window.firebase.firestore.FieldValue.serverTimestamp() }, { merge: true });
++  if (oldVersion) {
++    for (let i = 0; i < oldCount; i++) await docRef.collection('chunks').doc(oldVersion + '_' + i).delete().catch(() => {});
++  }
++  return docRef.id;
++}
++
++async function readChunked (docRef) {
++  let meta = await docRef.get();
++  if (!meta.exists) throw new Error('not-found');
++  let { version, chunkCount, type } = meta.data();
++  let reads = [];
++  for (let i = 0; i < chunkCount; i++) reads.push(docRef.collection('chunks').doc(version + '_' + i).get());
++  let parts = (await Promise.all(reads)).map(c => c.data().data);
++  return base64ToBlob(parts.join(''), type);
++}
++
++async function deleteChunked (docRef) {
++  let meta = await docRef.get();
++  if (!meta.exists) return;
++  let { version, chunkCount } = meta.data();
++  for (let i = 0; i < (chunkCount || 0); i++) await docRef.collection('chunks').doc(version + '_' + i).delete().catch(() => {});
++  await docRef.delete();
++}
++
++function tsToMillis (t) { return t && t.toMillis ? t.toMillis() : (typeof t === 'number' ? t : 0); }
++
++/* ---------- public API ---------- */
++
++const cloud = {
++  COLORS, ANIMALS, COLOR_HEX,
++
++  /** Resolves true if cloud features are configured and the SDK loaded. */
++  enabled () { return B() ? Promise.resolve(true) : init(); },
++
++  user () { return B() ? B().user() : currentUser; },
++
++  /** Calls cb(user) now (once ready) and whenever the signed-in user changes. Returns an unsubscribe function. */
++  onUserChange (cb) {
++    if (B()) return B().onUserChange(cb);
++    listeners.add(cb);
++    if (ready) cb(currentUser);
++    return () => listeners.delete(cb);
++  },
++
++  pictureFor (label) {
++    let [color, animal] = String(label).split(' ');
++    let a = ANIMALS.find(x => x[0] === animal);
++    return { emoji: a ? a[1] : '⭐', color: COLOR_HEX[color] || '#ccc' };
++  },
++
++  /* ----- sign in / out ----- */
++
++  async listClasses () {
++    if (B()) return B().listClasses();
++    let snap = await db.collection('classes').orderBy('name').get();
++    return snap.docs.map(d => Object.assign({ id: d.id }, d.data()));
++  },
++
++  async studentSignIn (classId, label, pin) {
++    if (B()) return B().studentSignIn(classId, label, pin);
++    let cls = await db.collection('classes').doc(classId).get();
++    let entry = cls.exists && (cls.data().students || []).find(s => s.label === label);
++    if (!entry) throw new Error('not-found');
++    await auth.signInWithEmailAndPassword(entry.email, passwordFor(label, pin));
++  },
++
++  async teacherSignIn (email, password) {
++    if (B()) return B().teacherSignIn(email, password);
++    await auth.signInWithEmailAndPassword(email, password);
++  },
++
++  /** First-time setup. Returns the new account's uid, which goes into teachers/{uid} in the Firebase console. */
++  async teacherCreateAccount (email, password) {
++    if (B()) return B().teacherCreateAccount(email, password);
++    let cred = await auth.createUserWithEmailAndPassword(email, password);
++    return cred.user.uid;
++  },
++
++  signOut () { return B() ? B().signOut() : auth.signOut(); },
++
++  /* ----- classes (teacher) ----- */
++
++  async createClass (name) {
++    if (B()) return B().createClass(name);
++    let ref = db.collection('classes').doc(slug(name).slice(0, 20) + '-' + randomId(4));
++    await ref.set({ name: name, students: [], createdAt: window.firebase.firestore.FieldValue.serverTimestamp() });
++    await db.collection('classSecrets').doc(ref.id).set({ pins: {} });
++    return ref.id;
++  },
++
++  async getClassSecrets (classId) {
++    if (B()) return B().getClassSecrets(classId);
++    let s = await db.collection('classSecrets').doc(classId).get();
++    return s.exists ? s.data().pins || {} : {};
++  },
++
++  /** Creates a student login with a new PIN. Uses a second Firebase app so the teacher stays signed in. */
++  async _makeStudentLogin (classId, label, gen) {
++    let pin = randomPin();
++    let email = 's-' + classId + '-' + slug(label) + (gen ? '-' + gen : '') + '@' + STUDENT_DOMAIN;
++    let maker = window.firebase.apps.find(a => a.name === 'student-maker') || window.firebase.initializeApp(cloudConfig, 'student-maker');
++    let makerAuth = maker.auth();
++    if (cloudConfig.authEmulator) { try { makerAuth.useEmulator(cloudConfig.authEmulator); } catch (e) { /* already set */ } }
++    let cred = await makerAuth.createUserWithEmailAndPassword(email, passwordFor(label, pin));
++    let uid = cred.user.uid;
++    await makerAuth.signOut();
++    await db.collection('students').doc(uid).set({ classId: classId, label: label });
++    return { uid, email, pin };
++  },
++
++  /** Adds `count` students with unused picture names. Returns [{label, pin}]. */
++  async addStudents (classId, count) {
++    if (B()) return B().addStudents(classId, count);
++    let ref = db.collection('classes').doc(classId);
++    let cls = (await ref.get()).data();
++    let used = new Set((cls.students || []).map(s => s.label));
++    // Every animal once before any repeats, with the colors mixed up.
++    let options = [];
++    for (let r = 0; r < COLORS.length; r++) ANIMALS.forEach(([a], ai) => options.push(COLORS[(ai + r * 3) % COLORS.length] + ' ' + a));
++    let added = [];
++    let pickNext = () => options.find(o => !used.has(o));
++    let pins = {};
++    let students = (cls.students || []).slice();
++    for (let i = 0; i < count; i++) {
++      let label = pickNext();
++      if (!label) break;
++      used.add(label);
++      let made = await this._makeStudentLogin(classId, label, 0);
++      students.push({ label: label, email: made.email, uid: made.uid });
++      pins[label] = made.pin;
++      added.push({ label: label, pin: made.pin });
++      await ref.update({ students: students });
++      await db.collection('classSecrets').doc(classId).set({ pins: pins }, { merge: true });
++    }
++    return added;
++  },
++
++  /** Gives a student a new PIN. Their projects move to the new login. */
++  async resetPin (classId, label) {
++    if (B()) return B().resetPin(classId, label);
++    let ref = db.collection('classes').doc(classId);
++    let cls = (await ref.get()).data();
++    let students = (cls.students || []).slice();
++    let i = students.findIndex(s => s.label === label);
++    if (i === -1) throw new Error('not-found');
++    let old = students[i];
++    let gen = (old.gen || 0) + 1;
++    let made = await this._makeStudentLogin(classId, label, gen);
++    let projects = await db.collection('projects').where('owner', '==', old.uid).get();
++    for (let d of projects.docs) await d.ref.update({ owner: made.uid });
++    students[i] = { label: label, email: made.email, uid: made.uid, gen: gen };
++    await ref.update({ students: students });
++    await db.collection('classSecrets').doc(classId).set({ pins: { [label]: made.pin } }, { merge: true });
++    await db.collection('students').doc(old.uid).delete();
++    return made.pin;
++  },
++
++  async removeStudent (classId, label) {
++    if (B()) return B().removeStudent(classId, label);
++    let ref = db.collection('classes').doc(classId);
++    let cls = (await ref.get()).data();
++    let s = (cls.students || []).find(x => x.label === label);
++    await ref.update({ students: (cls.students || []).filter(x => x.label !== label) });
++    if (s) await db.collection('students').doc(s.uid).delete();
++  },
++
++  async renameClass (classId, name) {
++    if (B()) return B().renameClass(classId, name);
++    await db.collection('classes').doc(classId).update({ name: name });
++  },
++
++  /* ----- projects ----- */
++
++  async listProjects (opts) {
++    if (B()) return B().listProjects(opts);
++    let q = db.collection('projects');
++    q = opts && opts.classId ? q.where('classId', '==', opts.classId) : q.where('owner', '==', currentUser.uid);
++    let snap = await q.get();
++    return snap.docs.map(d => {
++      let x = d.data();
++      return { id: d.id, title: x.title, thumb: x.thumb, owner: x.owner, label: x.label, size: x.size, updatedAt: tsToMillis(x.updatedAt) };
++    }).filter(p => p.updatedAt || p.size).sort((a, b) => b.updatedAt - a.updatedAt);
++  },
++
++  /** Saves a project. Pass id to overwrite one of your own. Returns the id. */
++  async saveProject ({ id, title, thumb, blob }) {
++    if (B()) return B().saveProject({ id, title, thumb, blob });
++    let ref = id ? db.collection('projects').doc(id) : db.collection('projects').doc();
++    let meta = { owner: currentUser.uid, title: title || 'Untitled', thumb: thumb || null,
++      classId: currentUser.classId || null, label: currentUser.label || 'Teacher' };
++    return writeChunked(ref, meta, blob);
++  },
++
++  loadProject (id) { return B() ? B().loadProject(id) : readChunked(db.collection('projects').doc(id)); },
++  deleteProject (id) { return B() ? B().deleteProject(id) : deleteChunked(db.collection('projects').doc(id)); },
++
++  /* ----- Learn (teacher publishes, everyone reads) ----- */
++
++  async listLearn () {
++    if (B()) return B().listLearn();
++    let snap = await db.collection('learn').get();
++    return snap.docs.map(d => Object.assign({ id: 'cloud-' + d.id, cloudId: d.id }, d.data(), { updatedAt: tsToMillis(d.data().updatedAt) }))
++      .filter(x => x.chunkCount > 0)
++      .sort((a, b) => (a.order || 0) - (b.order || 0) || a.title.localeCompare(b.title));
++  },
++
++  async publishLearn ({ cloudId, title, description, principles, tags, preview, blob, order }) {
++    if (B()) return B().publishLearn({ cloudId, title, description, principles, tags, preview, blob, order });
++    let ref = cloudId ? db.collection('learn').doc(cloudId) : db.collection('learn').doc(slug(title).slice(0, 40) + '-' + randomId(4));
++    let meta = { title, description: description || '', principles: principles || [], tags: tags || [], preview: preview || null, order: order || 0 };
++    return writeChunked(ref, meta, blob);
++  },
++
++  async updateLearnInfo (cloudId, info) {
++    if (B()) return B().updateLearnInfo(cloudId, info);
++    await db.collection('learn').doc(cloudId).update(info);
++  },
++
++  loadLearn (cloudId) { return B() ? B().loadLearn(cloudId) : readChunked(db.collection('learn').doc(cloudId)); },
++  deleteLearn (cloudId) { return B() ? B().deleteLearn(cloudId) : deleteChunked(db.collection('learn').doc(cloudId)); },
++
++  /* ----- Class Sounds (teacher uploads, signed-in students use) ----- */
++
++  async listClassSounds () {
++    if (B()) return B().listClassSounds();
++    let snap = await db.collection('classSounds').get();
++    return snap.docs.map(d => Object.assign({ id: d.id }, d.data()))
++      .filter(x => x.chunkCount > 0)
++      .sort((a, b) => String(a.name).localeCompare(String(b.name)));
++  },
++
++  async uploadClassSound ({ name, seconds, blob }) {
++    if (B()) return B().uploadClassSound({ name, seconds, blob });
++    let ref = db.collection('classSounds').doc(slug(name).slice(0, 40) + '-' + randomId(4));
++    return writeChunked(ref, { name: name, seconds: seconds || 1, type: blob.type || 'audio/mpeg' }, blob);
++  },
++
++  loadClassSound (id) { return B() ? B().loadClassSound(id) : readChunked(db.collection('classSounds').doc(id)); },
++  deleteClassSound (id) { return B() ? B().deleteClassSound(id) : deleteChunked(db.collection('classSounds').doc(id)); },
++
++  /* ----- which online project is open in the editor ----- */
++
++  /** Remembers that the editor's project (by its uuid) came from online project `id`. */
++  setOpenProject (projectUuid, id, title) { this._open = id ? { projectUuid, id, title } : null; },
++  openProjectFor (projectUuid) { return this._open && this._open.projectUuid === projectUuid ? this._open : null; },
++
++  /** Turns Firebase error codes into something a student or teacher can act on. */
++  message (e) {
++    let code = (e && (e.code || e.message)) || '';
++    if (/wrong-password|invalid-credential|invalid-login|user-not-found|not-found/.test(code)) return "That PIN didn't match. Try again, or ask your teacher.";
++    if (/too-many-requests/.test(code)) return 'Too many tries. Wait a minute, then try again.';
++    if (/network|unavailable|failed-precondition|deadline/.test(code)) return "Couldn't reach the save server. Check the Wi-Fi and try again.";
++    if (/permission-denied/.test(code)) return "This account isn't allowed to do that.";
++    if (/too-big/.test(code)) return 'This project is too big to save online (over 15 MB). Try removing big sounds or images.';
++    if (/email-already-in-use/.test(code)) return 'That email already has an account. Sign in instead.';
++    if (/weak-password/.test(code)) return 'Use a password with at least 6 characters.';
++    if (/invalid-email/.test(code)) return "That email address doesn't look right.";
++    return 'Something went wrong (' + code + ').';
++  },
++};
++
++window.wickCloud = cloud;
++export default cloud;
 diff --git a/src/files/filehandler.js b/src/files/filehandler.js
 index 836a3cd..79943e5 100644
 --- a/src/files/filehandler.js
@@ -819,3 +5543,23 @@ index 836a3cd..79943e5 100644
          input.click();
        }
  
+diff --git a/src/resources/tool-icons/brush-texture-chalk.png b/src/resources/tool-icons/brush-texture-chalk.png
+new file mode 100644
+index 0000000..37b2cd1
+Binary files /dev/null and b/src/resources/tool-icons/brush-texture-chalk.png differ
+diff --git a/src/resources/tool-icons/brush-texture-charcoal.png b/src/resources/tool-icons/brush-texture-charcoal.png
+new file mode 100644
+index 0000000..3fda822
+Binary files /dev/null and b/src/resources/tool-icons/brush-texture-charcoal.png differ
+diff --git a/src/resources/tool-icons/brush-texture-crayon.png b/src/resources/tool-icons/brush-texture-crayon.png
+new file mode 100644
+index 0000000..c5df031
+Binary files /dev/null and b/src/resources/tool-icons/brush-texture-crayon.png differ
+diff --git a/src/resources/tool-icons/brush-texture-none.png b/src/resources/tool-icons/brush-texture-none.png
+new file mode 100644
+index 0000000..14310d6
+Binary files /dev/null and b/src/resources/tool-icons/brush-texture-none.png differ
+diff --git a/src/resources/tool-icons/brush-texture-spray.png b/src/resources/tool-icons/brush-texture-spray.png
+new file mode 100644
+index 0000000..f07095e
+Binary files /dev/null and b/src/resources/tool-icons/brush-texture-spray.png differ

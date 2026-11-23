@@ -46854,7 +46854,21 @@ Wick.ToolSettings = class {
       name: 'brushMode',
       default: 'none',
       options: ['none', 'behind', 'inside']
-    }];
+    }, {
+      type: "choice",
+      name: 'brushTexture',
+      default: 'none',
+      options: ['none', 'crayon', 'chalk', 'charcoal', 'spray']
+    }, {
+            type: "choice",
+            name: 'artLayer',
+            default: 'line',
+            options: ['line', 'color']
+        }, {
+            type: "boolean",
+            name: 'bucketFillsColor',
+            default: true
+        }];
   }
   /**
    * Create a new ToolSettings object.
@@ -53941,7 +53955,10 @@ Wick.Path = class extends Wick.Base {
     var data = super._serialize(args);
 
     data.json = this.json;
-    delete data.json[1].data; // optimization: replace dataurls with asset uuids
+    // Keep only the Line/Color art tag; drop runtime data (uuids, view state)
+    var artLayer = data.json[1].data && data.json[1].data.artLayer;
+    delete data.json[1].data;
+    if (artLayer) data.json[1].data = { artLayer: artLayer }; // optimization: replace dataurls with asset uuids
 
     if (data.json[0] === 'Raster' && data.json[1].source.startsWith('data:')) {
       if (!this.project) {
@@ -58538,6 +58555,145 @@ Wick.Button = class extends Wick.Clip {
  * You should have received a copy of the GNU General Public License
  * along with Wick Engine.  If not, see <https://www.gnu.org/licenses/>.
  */
+/*
+ * Line Art / Color Art for Wick layers (in the spirit of Toon Boom Harmony).
+ *
+ * Every layer stays a single timeline row. Each path drawn into a frame is
+ * tagged as 'line' or 'color' (stored in the paper.js item's data, so it is
+ * saved with the project). Within a frame, color art is always kept below
+ * everything else, so line art sits on top no matter what order things were
+ * drawn in. Either kind can be hidden while editing; hiding never affects
+ * exports or published projects.
+ *
+ * Untagged content (older projects, images, text, clips) is treated like line
+ * art for stacking: it stays above color art.
+ *
+ * This file is part of a modified version of Wick Editor and is licensed
+ * under the GNU General Public License v3 or later.
+ */
+
+Wick.ArtLayers = {
+    LINE: 'line',
+    COLOR: 'color',
+
+    /* View toggles. Not saved with the project or settings, so every session starts with both visible. */
+    showLine: true,
+    showColor: true,
+
+    /* Called after a visibility change so the editor can re-render the canvas. */
+    onVisibilityChange: null,
+
+    /* UI listeners (e.g. the toolbar switch) told whenever visibility changes. */
+    _listeners: [],
+
+    subscribe: function (fn) {
+        Wick.ArtLayers._listeners.push(fn);
+        return function () {
+            Wick.ArtLayers._listeners = Wick.ArtLayers._listeners.filter(function (f) { return f !== fn; });
+        };
+    },
+
+    _notify: function () {
+        Wick.ArtLayers._listeners.forEach(function (fn) { fn(); });
+    },
+
+    typeOf: function (item) {
+        var t = item && item.data && item.data.artLayer;
+        return t === 'color' || t === 'line' ? t : null;
+    },
+
+    isColor: function (item) {
+        return Wick.ArtLayers.typeOf(item) === 'color';
+    },
+
+    setVisible: function (type, visible) {
+        if (type === 'color') Wick.ArtLayers.showColor = !!visible;
+        if (type === 'line') Wick.ArtLayers.showLine = !!visible;
+        Wick.ArtLayers._notify();
+        if (Wick.ArtLayers.onVisibilityChange) Wick.ArtLayers.onVisibilityChange();
+    },
+
+    /* Hide or re-show an item on the editing canvas to match the Line/Color toggles. */
+    applyVisibility: function (item) {
+        var t = Wick.ArtLayers.typeOf(item);
+        if ((t === 'color' && !Wick.ArtLayers.showColor) || (t === 'line' && !Wick.ArtLayers.showLine)) {
+            item.visible = false;
+            item.data.artHidden = true;
+        } else {
+            // Canvas items are reused between renders, so undo an earlier hide
+            Wick.ArtLayers.restoreVisibility(item);
+        }
+    },
+
+    /* Undo applyVisibility before an item is saved, so hiding never gets stored in the project. */
+    restoreVisibility: function (item) {
+        if (item && item.data && item.data.artHidden) {
+            item.visible = true;
+            delete item.data.artHidden;
+        }
+    },
+
+    _content: function (layer, except) {
+        return layer.children.filter(function (child) {
+            return child !== except && !(child.data && child.data.wickType === 'gui');
+        });
+    },
+
+    /*
+     * Tag an item and insert it into a paper layer at the right depth.
+     * position: 'top' or 'bottom' of its own stack (color stack or line stack).
+     */
+    place: function (item, type, layer, position) {
+        type = type === 'color' ? 'color' : 'line';
+        item.data = item.data || {};
+        item.data.artLayer = type;
+
+        // Drawing into a hidden art type turns it back on, so the new stroke doesn't vanish.
+        // (Only the flag changes here; the canvas re-renders with it after the edit is applied.)
+        if (type === 'color' && !Wick.ArtLayers.showColor) { Wick.ArtLayers.showColor = true; Wick.ArtLayers._notify(); }
+        if (type === 'line' && !Wick.ArtLayers.showLine) { Wick.ArtLayers.showLine = true; Wick.ArtLayers._notify(); }
+
+        var content = Wick.ArtLayers._content(layer, item);
+        var colors = content.filter(Wick.ArtLayers.isColor);
+        var others = content.filter(function (c) { return !Wick.ArtLayers.isColor(c); });
+
+        if (type === 'color') {
+            if (position === 'bottom' && content.length) {
+                item.insertBelow(content[0]);
+            } else if (others.length) {
+                // top of the color stack = just under the lowest line art
+                item.insertBelow(others[0]);
+            } else {
+                layer.addChild(item);
+            }
+        } else {
+            if (position === 'bottom') {
+                if (colors.length) {
+                    item.insertAbove(colors[colors.length - 1]);
+                } else if (content.length) {
+                    item.insertBelow(content[0]);
+                } else {
+                    layer.addChild(item);
+                }
+            } else {
+                layer.addChild(item);
+            }
+        }
+    },
+
+    /* Move all color art below everything else in a frame, keeping each group's own order. */
+    normalize: function (layer) {
+        var children = layer.children.slice();
+        var colors = children.filter(Wick.ArtLayers.isColor);
+        if (colors.length === 0) return;
+
+        var others = children.filter(function (c) { return !Wick.ArtLayers.isColor(c); });
+        var ordered = colors.concat(others);
+        var inOrder = ordered.every(function (c, i) { return children[i] === c; });
+        if (!inOrder) layer.addChildren(ordered);
+    },
+};
+
 Wick.Tool = class {
   static get DOUBLE_CLICK_TIME() {
     return 300;
@@ -58783,6 +58939,13 @@ Wick.Tool = class {
     return true;
   }
   /**
+   * Which art layer new strokes go into: 'line' or 'color' (from the Line/Color switch).
+   */
+  get artLayerType() {
+      return this.getSetting('artLayer') === 'color' ? 'color' : 'line';
+  }
+
+  /**
    * Adds a paper.Path to the active frame's paper.Layer.
    * @param {paper.Path} path - the path to add
    * @param {Wick.Frame} frame - (optional) the frame to add the path to.
@@ -58817,7 +58980,8 @@ Wick.Tool = class {
     if (frame && frame !== this.project.activeFrame) {
       /* If the path must be added to a frame other than the active frame,
        * convert the paper.js path into a Wick path and add it to the given frame. */
-      var wickPath = new Wick.Path({
+      path.data.artLayer = this.artLayerType;
+            var wickPath = new Wick.Path({
         json: path.exportJSON({
           asString: false
         })
@@ -58827,7 +58991,7 @@ Wick.Tool = class {
       /* Otherwise, directly add the paper.js path to the paper.js project.
          This is signifigantly faster than creating the Wick path, as this
          method does not require a re-render of the canvas. */
-      this.paper.project.activeLayer.addChild(path);
+      Wick.ArtLayers.place(path, this.artLayerType, this.paper.project.activeLayer, 'top');
     }
   }
 
@@ -58851,6 +59015,289 @@ Wick.Tools = {};
  * You should have received a copy of the GNU General Public License
  * along with Wick Engine.  If not, see <https://www.gnu.org/licenses/>.
  */
+/*
+ * Textured brush tips for the Wick brush tool.
+ *
+ * The brush paints a stroke into a raster canvas (Croquis) and then traces it
+ * into a vector shape with potrace. Grain textures (crayon, chalk, charcoal)
+ * are applied as a mask to that raster just before tracing, so the grain
+ * becomes part of the vector shape. Spray paints with randomized dot stamps.
+ *
+ * Everything is generated procedurally from a fixed seed, so the grain looks
+ * the same every time the editor loads.
+ */
+
+Wick.BrushTextures = (function () {
+    var TILE = 256;
+    var NAMES = ['none', 'crayon', 'chalk', 'charcoal', 'spray'];
+    var GRAINS = ['crayon', 'chalk', 'charcoal'];
+
+    var tileCache = {};
+    var tileURLCache = {};
+
+    function rng (seed) {
+        return function () {
+            seed |= 0; seed = seed + 0x6D2B79F5 | 0;
+            var t = Math.imul(seed ^ seed >>> 15, 1 | seed);
+            t = t + Math.imul(t ^ t >>> 7, 61 | t) ^ t;
+            return ((t ^ t >>> 14) >>> 0) / 4294967296;
+        };
+    }
+
+    /* Seamless value noise over a TILE x TILE square. cellX/cellY = cell size in px. */
+    function makeNoise (seed, cellX, cellY) {
+        var rand = rng(seed);
+        var gw = Math.max(1, Math.round(TILE / cellX));
+        var gh = Math.max(1, Math.round(TILE / cellY));
+        var grid = new Float32Array(gw * gh);
+        for (var i = 0; i < grid.length; i++) grid[i] = rand();
+        var sx = gw / TILE, sy = gh / TILE;
+        return function (x, y) {
+            var fx = x * sx, fy = y * sy;
+            var x0 = Math.floor(fx), y0 = Math.floor(fy);
+            var tx = fx - x0, ty = fy - y0;
+            tx = tx * tx * (3 - 2 * tx);
+            ty = ty * ty * (3 - 2 * ty);
+            var x1 = (x0 + 1) % gw, y1 = (y0 + 1) % gh;
+            x0 = x0 % gw; y0 = y0 % gh;
+            var a = grid[y0 * gw + x0], b = grid[y0 * gw + x1];
+            var c = grid[y1 * gw + x0], d = grid[y1 * gw + x1];
+            return (a + (b - a) * tx) + ((c + (d - c) * tx) - (a + (b - a) * tx)) * ty;
+        };
+    }
+
+    /* Returns 0..1 grain value for each texture. Pixels above the threshold are kept. */
+    var RECIPES = {
+        crayon: function () {
+            var fine = makeNoise(11, 3, 3), mid = makeNoise(12, 8, 8), tooth = makeNoise(13, 4, 12);
+            return { threshold: 0.33, value: function (x, y) {
+                return 0.4 * fine(x, y) + 0.35 * mid(x, y) + 0.25 * tooth(x, y);
+            }};
+        },
+        chalk: function () {
+            var fine = makeNoise(21, 2, 2), mid = makeNoise(22, 6, 6), coarse = makeNoise(23, 16, 16);
+            return { threshold: 0.47, value: function (x, y) {
+                return 0.4 * fine(x, y) + 0.35 * mid(x, y) + 0.25 * coarse(x, y);
+            }};
+        },
+        charcoal: function () {
+            var streak = makeNoise(31, 32, 3), blotch = makeNoise(32, 16, 10), fine = makeNoise(33, 3, 3);
+            return { threshold: 0.40, value: function (x, y) {
+                return 0.4 * streak(x, y) + 0.3 * blotch(x, y) + 0.3 * fine(x, y);
+            }};
+        },
+    };
+
+    /*
+     * Edge roughness for each texture.
+     * amp: how far the noise pushes the outline in and out (in blurred-alpha units).
+     * blur: edge softening radius as a fraction of brush size, before re-thresholding.
+     */
+    var EDGES = {
+        crayon: { amp: 0.75, blur: 0.12, field: function () {
+            var a = makeNoise(41, 3, 3), b = makeNoise(42, 7, 7);
+            return function (x, y) { return 0.55 * a(x, y) + 0.45 * b(x, y); };
+        }},
+        chalk: { amp: 1.3, blur: 0.18, field: function () {
+            var a = makeNoise(51, 2, 2), b = makeNoise(52, 5, 5), c = makeNoise(53, 12, 12);
+            return function (x, y) { return 0.4 * a(x, y) + 0.35 * b(x, y) + 0.25 * c(x, y); };
+        }},
+        charcoal: { amp: 1.1, blur: 0.16, field: function () {
+            var a = makeNoise(61, 24, 3), b = makeNoise(62, 3, 3), c = makeNoise(63, 10, 10);
+            return function (x, y) { return 0.45 * a(x, y) + 0.3 * b(x, y) + 0.25 * c(x, y); };
+        }},
+    };
+    var edgeFieldCache = {};
+
+    function getEdgeField (name) {
+        if (edgeFieldCache[name]) return edgeFieldCache[name];
+        var f = EDGES[name].field();
+        var field = new Float32Array(TILE * TILE);
+        var min = Infinity, max = -Infinity;
+        for (var y = 0; y < TILE; y++) {
+            for (var x = 0; x < TILE; x++) {
+                var v = f(x, y);
+                field[y * TILE + x] = v;
+                if (v < min) min = v;
+                if (v > max) max = v;
+            }
+        }
+        // stretch to the full 0..1 range so amp means the same thing for every texture
+        for (var i = 0; i < field.length; i++) field[i] = (field[i] - min) / (max - min);
+        edgeFieldCache[name] = field;
+        return field;
+    }
+
+    /* In-place separable box blur of a Float32 array (w x h), radius r. */
+    function boxBlur (src, w, h, r) {
+        if (r < 1) return src;
+        var tmp = new Float32Array(src.length);
+        var norm = 1 / (2 * r + 1);
+        var x, y, acc, i;
+        for (y = 0; y < h; y++) {
+            var row = y * w;
+            acc = 0;
+            for (x = -r; x <= r; x++) acc += src[row + Math.min(w - 1, Math.max(0, x))];
+            for (x = 0; x < w; x++) {
+                tmp[row + x] = acc * norm;
+                acc += src[row + Math.min(w - 1, x + r + 1)] - src[row + Math.max(0, x - r)];
+            }
+        }
+        for (x = 0; x < w; x++) {
+            acc = 0;
+            for (y = -r; y <= r; y++) acc += tmp[Math.min(h - 1, Math.max(0, y)) * w + x];
+            for (y = 0; y < h; y++) {
+                src[y * w + x] = acc * norm;
+                acc += tmp[Math.min(h - 1, y + r + 1) * w + x] - tmp[Math.max(0, y - r) * w + x];
+            }
+        }
+        return src;
+    }
+
+    /* A TILE x TILE canvas, opaque where paint stays, transparent where grain shows through. */
+    function getTile (name) {
+        if (tileCache[name]) return tileCache[name];
+        var recipe = RECIPES[name]();
+        var canvas = document.createElement('canvas');
+        canvas.width = TILE;
+        canvas.height = TILE;
+        var ctx = canvas.getContext('2d');
+        var img = ctx.createImageData(TILE, TILE);
+        for (var y = 0; y < TILE; y++) {
+            for (var x = 0; x < TILE; x++) {
+                var i = (y * TILE + x) * 4;
+                img.data[i] = img.data[i + 1] = img.data[i + 2] = 255;
+                img.data[i + 3] = recipe.value(x, y) > recipe.threshold ? 255 : 0;
+            }
+        }
+        ctx.putImageData(img, 0, 0);
+        tileCache[name] = canvas;
+        return canvas;
+    }
+
+    function getTileURL (name) {
+        if (!tileURLCache[name]) tileURLCache[name] = getTile(name).toDataURL('image/png');
+        return tileURLCache[name];
+    }
+
+    function isGrain (name) {
+        return GRAINS.indexOf(name) !== -1;
+    }
+
+    /*
+     * Texture a canvas holding a painted stroke: roughen its outline, then
+     * knock the grain out of it. The result is hard-edged (opaque or clear),
+     * ready for potrace.
+     * offsetX/offsetY: where this canvas's (0,0) sits in the anchored grain space,
+     * so the grain stays put on the drawing instead of following each stroke.
+     * brushSize: the stroke's brush size in canvas pixels (scales the edge roughness).
+     */
+    function applyGrain (canvas, name, offsetX, offsetY, brushSize) {
+        if (!isGrain(name)) return;
+        var w = canvas.width, h = canvas.height;
+        if (!w || !h) return;
+        var ctx = canvas.getContext('2d');
+        var img = ctx.getImageData(0, 0, w, h);
+        var data = img.data;
+        var ox = ((Math.round(offsetX) % TILE) + TILE) % TILE;
+        var oy = ((Math.round(offsetY) % TILE) + TILE) % TILE;
+
+        var edge = EDGES[name];
+        var field = getEdgeField(name);
+        var size = brushSize || 20;
+        var r = Math.max(1, Math.min(14, Math.round(size * edge.blur)));
+
+        // Blurred coverage: 1 deep inside the stroke, falling to 0 just outside it
+        var cov = new Float32Array(w * h);
+        for (var i = 0, j = 3; i < cov.length; i++, j += 4) cov[i] = data[j] / 255;
+        boxBlur(cov, w, h, r);
+        boxBlur(cov, w, h, r);
+
+        var grain = getTile(name).getContext('2d').getImageData(0, 0, TILE, TILE).data;
+
+        for (var y = 0; y < h; y++) {
+            var ty = ((y + oy) % TILE) * TILE;
+            for (var x = 0; x < w; x++) {
+                var p = y * w + x;
+                var c = cov[p];
+                var a = 0;
+                if (c > 0.02) {
+                    var t = ty + ((x + ox) % TILE);
+                    // Noise pushes the outline in and out; grain cuts holes inside
+                    if (c + edge.amp * (field[t] - 0.5) > 0.5 && grain[t * 4 + 3] > 0) a = 255;
+                }
+                data[p * 4 + 3] = a;
+            }
+        }
+        ctx.putImageData(img, 0, 0);
+    }
+
+    /* Show the grain on the live (pre-trace) stroke using a CSS mask. */
+    function setPreviewMask (element, name, offsetX, offsetY, ratio) {
+        var style = element.style;
+        if (!isGrain(name)) {
+            style.webkitMaskImage = style.maskImage = '';
+            return;
+        }
+        ratio = ratio || 1;
+        var url = 'url(' + getTileURL(name) + ')';
+        var ox = ((Math.round(offsetX) % TILE) + TILE) % TILE;
+        var oy = ((Math.round(offsetY) % TILE) + TILE) % TILE;
+        style.webkitMaskImage = style.maskImage = url;
+        style.webkitMaskSize = style.maskSize = (TILE * ratio) + 'px ' + (TILE * ratio) + 'px';
+        style.webkitMaskRepeat = style.maskRepeat = 'repeat';
+        style.webkitMaskPosition = style.maskPosition = (-ox * ratio) + 'px ' + (-oy * ratio) + 'px';
+    }
+
+    var sprayRand = rng(4242);
+
+    /* A stamp of random dots, denser toward the middle, at the brush's pixel size. */
+    function makeSprayStamp (size) {
+        size = Math.max(4, Math.round(size));
+        var canvas = document.createElement('canvas');
+        canvas.width = canvas.height = size;
+        var ctx = canvas.getContext('2d');
+        ctx.fillStyle = '#fff';
+        var r = size / 2;
+        var dotR = Math.max(1.3, size * 0.022);
+        var count = Math.max(6, Math.round(size * 0.9));
+        for (var i = 0; i < count; i++) {
+            var a = sprayRand() * Math.PI * 2;
+            var d = Math.pow(sprayRand(), 0.75) * (r - dotR);
+            var dr = dotR * (0.7 + sprayRand() * 0.8);
+            ctx.beginPath();
+            ctx.arc(r + Math.cos(a) * d, r + Math.sin(a) * d, dr, 0, Math.PI * 2);
+            ctx.fill();
+        }
+        return canvas;
+    }
+
+    /* A few different stamps so a stroke doesn't show a repeating pattern. */
+    function makeSprayStamps (size) {
+        var stamps = [];
+        for (var i = 0; i < 6; i++) stamps.push(makeSprayStamp(size));
+        return stamps;
+    }
+
+    /* Tracing options: drop specks too small to see and simplify grainy outlines. */
+    function potraceOptions (name) {
+        if (name === 'spray') return { turdSize: 2, optTolerance: 0.4 };
+        if (isGrain(name)) return { turdSize: 4, optTolerance: 0.45 };
+        return {};
+    }
+
+    return {
+        TILE: TILE,
+        NAMES: NAMES,
+        isGrain: isGrain,
+        getTile: getTile,
+        applyGrain: applyGrain,
+        setPreviewMask: setPreviewMask,
+        makeSprayStamps: makeSprayStamps,
+        potraceOptions: potraceOptions,
+    };
+})();
+
 Wick.Tools.Brush = class extends Wick.Tool {
   static get CROQUIS_WAIT_AMT_MS() {
     return 100;
@@ -58949,7 +59396,8 @@ Wick.Tools.Brush = class extends Wick.Tool {
     this.croquisBrush.setSpacing(this.BRUSH_POINT_SPACING);
     this.croquis.setToolStabilizeLevel(this.BRUSH_STABILIZER_LEVEL);
     this.croquis.setToolStabilizeWeight(this.getSetting('brushStabilizerWeight') / 100.0 + 0.3);
-    this.croquis.setToolStabilizeInterval(1); // Forward mouse event to croquis canvas
+    this.croquis.setToolStabilizeInterval(1);
+    this._setupBrushTexture(); // Forward mouse event to croquis canvas
 
     var point = this._croquisToPaperPoint(e.point);
 
@@ -58974,6 +59422,8 @@ Wick.Tools.Brush = class extends Wick.Tool {
 
     try {
       this._updateLastMouseState(point, this.pressure);
+
+      this._nextSprayStamp();
 
       this.croquis.move(point.x, point.y, this.pressure);
     } catch (e) {
@@ -59155,7 +59605,11 @@ Wick.Tools.Brush = class extends Wick.Tool {
 
   _potraceCroquisCanvas(point) {
     this.errorOccured = false;
-    var strokeBounds = this.strokeBounds.clone(); // Attempting to draw with a transparent fill color. Throw an error.
+    var strokeBounds = this.strokeBounds.clone();
+    // Textured strokes get rough edges that reach past the brush outline, so trace a wider area
+    if (Wick.BrushTextures.isGrain(this._strokeTexture)) {
+        strokeBounds = strokeBounds.expand(this._strokeSize * 1.5);
+    } // Attempting to draw with a transparent fill color. Throw an error.
 
     if (this.getSetting('fillColor').a === 0) {
       this.handleBrushError('transparentColor');
@@ -59182,9 +59636,14 @@ Wick.Tools.Brush = class extends Wick.Tool {
       croppedCanvas.height = strokeBounds.height;
       if (strokeBounds.x < 0) strokeBounds.x = 0;
       if (strokeBounds.y < 0) strokeBounds.y = 0;
-      croppedCanvasCtx.drawImage(canvas, strokeBounds.x, strokeBounds.y, strokeBounds.width, strokeBounds.height, 0, 0, croppedCanvas.width, croppedCanvas.height); // Run potrace and add the resulting path to the project
+      croppedCanvasCtx.drawImage(canvas, strokeBounds.x, strokeBounds.y, strokeBounds.width, strokeBounds.height, 0, 0, croppedCanvas.width, croppedCanvas.height);
+      // Bake the brush texture grain into the stroke before tracing it
+      var grainOffset = this._grainOffset();
+      Wick.BrushTextures.applyGrain(croppedCanvas, this._strokeTexture,
+          strokeBounds.x + grainOffset.x, strokeBounds.y + grainOffset.y, this._strokeSize);
+ // Run potrace and add the resulting path to the project
 
-      var svg = potrace.fromImage(croppedCanvas).toSVG(1 / this.POTRACE_RESOLUTION / this.paper.view.zoom);
+      var svg = potrace.fromImage(croppedCanvas, Wick.BrushTextures.potraceOptions(this._strokeTexture)).toSVG(1 / this.POTRACE_RESOLUTION / this.paper.view.zoom);
       var potracePath = this.paper.project.importSVG(svg);
       potracePath.fillColor = this.getSetting('fillColor').rgba;
       potracePath.position.x += this.paper.view.bounds.x;
@@ -59265,6 +59724,51 @@ Wick.Tools.Brush = class extends Wick.Tool {
     return result;
   }
 
+  /* Set up the textured brush tip (if any) for the stroke that's starting. */
+  _setupBrushTexture () {
+    var texture = this.getSetting('brushTexture') || 'none';
+    if (Wick.BrushTextures.NAMES.indexOf(texture) === -1) texture = 'none';
+    this._strokeTexture = texture;
+    this._strokeSize = this._getRealBrushSize();
+
+    if (texture === 'spray') {
+      this._sprayStamps = Wick.BrushTextures.makeSprayStamps(this._getRealBrushSize());
+      this._sprayIndex = 0;
+      this.croquisBrush.setImage(this._sprayStamps[0]);
+      this.croquisBrush.setSpacing(0.3);
+      this.croquisBrush.setNormalSpread(0.25);
+      this.croquisBrush.setTangentSpread(0.25);
+    } else {
+      this._sprayStamps = null;
+      this.croquisBrush.setImage(null);
+      this.croquisBrush.setNormalSpread(0);
+      this.croquisBrush.setTangentSpread(0);
+    }
+
+    // Show the grain on the stroke while it's being drawn
+    var ratio = 1;
+    if (this.croquisDOMElement.clientWidth && this.croquis.getCanvasWidth()) {
+      ratio = this.croquisDOMElement.clientWidth / this.croquis.getCanvasWidth();
+    }
+    var offset = this._grainOffset();
+    Wick.BrushTextures.setPreviewMask(this.croquisDOMElement, texture, offset.x, offset.y, ratio);
+  }
+
+  /* Swap between spray stamps so a stroke doesn't show a repeating dot pattern. */
+  _nextSprayStamp () {
+    if (!this._sprayStamps) return;
+    this._sprayIndex = (this._sprayIndex + 1) % this._sprayStamps.length;
+    this.croquisBrush.setImage(this._sprayStamps[this._sprayIndex]);
+  }
+
+  /* Where the croquis canvas origin sits in grain space, so grain stays fixed to the drawing. */
+  _grainOffset () {
+    var zoom = this.paper.view.zoom;
+    return {
+      x: this.paper.view.bounds.x * zoom,
+      y: this.paper.view.bounds.y * zoom,
+    };
+  }
 };
 /*
  * Copyright 2020 WICKLETS LLC
@@ -60032,13 +60536,14 @@ Wick.Tools.FillBucket = class extends Wick.Tool {
             path.fillColor = this.getSetting('fillColor').rgba;
             path.name = null;
             this.addPathToProject();
-
-            if (e.item) {
-              path.insertAbove(e.item);
-            } else {
-              this.paper.project.activeLayer.addChild(path);
-              this.paper.OrderingUtils.sendToBack([path]);
-            }
+                        // Fills go into Color Art unless the "bucket fills color" setting is off
+                        var artType = this.getSetting('bucketFillsColor') ? 'color' : this.artLayerType;
+                        if (e.item && Wick.ArtLayers.typeOf(e.item) === artType) {
+                            path.data.artLayer = artType;
+                            path.insertAbove(e.item);
+                        } else {
+                            Wick.ArtLayers.place(path, artType, this.paper.project.activeLayer, artType === 'color' ? 'top' : 'bottom');
+                        }
 
             this.fireEvent({
               eventName: 'canvasModified',
@@ -61158,7 +61663,12 @@ Wick.Tools.Zoom = class extends Wick.Tool {
  */
 (function () {
   // Splits a CompoundPath with multiple CW children into individual pieces
-  function splitCompoundPath(compoundPath) {
+  function artOnly(p) {
+        // Keep the Line/Color art tag when the eraser rebuilds a shape
+        return (p && p.data && p.data.artLayer) ? { artLayer: p.data.artLayer } : {};
+    }
+
+    function splitCompoundPath(compoundPath) {
     // Create lists of 'holes' (CCW children) and 'parts' (CW children)
     var holes = [];
     var parts = [];
@@ -61169,7 +61679,7 @@ Wick.Tools.Zoom = class extends Wick.Tool {
         var part = child.clone({
           insert: false
         });
-        part.fillColor = compoundPath.fillColor;
+        part.fillColor = compoundPath.fillColor; part.data = Object.assign({}, compoundPath.data);
         part.insertAbove(compoundPath);
         parts.push(part);
       }
@@ -61195,7 +61705,7 @@ Wick.Tools.Zoom = class extends Wick.Tool {
         }
 
         if (cmp) {
-          cmp.fillColor = compoundPath.fillColor;
+          cmp.fillColor = compoundPath.fillColor; cmp.data = Object.assign({}, compoundPath.data);
           cmp.insertAbove(part);
           part.remove();
         }
@@ -61205,7 +61715,7 @@ Wick.Tools.Zoom = class extends Wick.Tool {
     holes.filter(hole => {
       return resolvedHoles.indexOf(hole) === -1;
     }).forEach(hole => {
-      hole.clockwise = !hole.clockwise;
+      hole.clockwise = !hole.clockwise; hole.data = Object.assign({}, compoundPath.data);
       paper.project.activeLayer.addChild(hole);
     });
     compoundPath.remove();
@@ -61221,12 +61731,12 @@ Wick.Tools.Zoom = class extends Wick.Tool {
 
     if (res.children) {
       res.insertAbove(path);
-      res.data = {};
+      res.data = artOnly(path);
       path.remove();
       splitCompoundPath(res);
     } else {
       if (res.segments.length > 0) {
-        res.data = {};
+        res.data = artOnly(path);
         res.insertAbove(path);
       }
 
@@ -61246,7 +61756,7 @@ Wick.Tools.Zoom = class extends Wick.Tool {
       // Since the path is only strokes, it's trivial to split it into individual paths
       var children = [];
       res.children.forEach(function (child) {
-        child.data = {};
+        child.data = artOnly(path);
         children.push(child);
         child.name = null;
       });
@@ -61256,7 +61766,7 @@ Wick.Tools.Zoom = class extends Wick.Tool {
       res.remove();
     } else {
       res.remove();
-      if (res.segments.length > 0) res.insertAbove(path);
+      { if (res.segments.length > 0) { res.data = artOnly(path); res.insertAbove(path); } }
     }
 
     path.remove();
@@ -61288,7 +61798,7 @@ Wick.Tools.Zoom = class extends Wick.Tool {
       return path instanceof paper.Path || path instanceof paper.CompoundPath;
     });
     var touchingPaths = this.children.filter(function (child) {
-      return eraserPath.bounds.intersects(child.bounds);
+      return child.visible !== false && eraserPath.bounds.intersects(child.bounds);
     });
     touchingPaths.forEach(path => {
       if (path.strokeColor && path.fillColor) {
@@ -63737,6 +64247,8 @@ Wick.View.Timeline = class extends Wick.View {
   render() {
     this.frameLayers = [];
     var layersInRenderOrder = this.model.layers.filter(layer => {
+      // Layers named "Notes" or "Annotations" are teaching notes: visible while editing,
+      // never in exported or published animations.
       if (layer.project.isPublished && /^\s*(notes?|annotations?)\s*$/i.test(layer.name || '')) return false;
       return layer.project.isPublished || !layer.hidden;
     }).reverse();
@@ -63920,11 +64432,18 @@ Wick.View.Frame = class extends Wick.View {
         return object.view.group;
       }
     });
+    // Hide line or color art on the editing canvas when switched off (never when published)
+    if (!(this.model.project && this.model.project.isPublished)) {
+        children.forEach(child => Wick.ArtLayers.applyVisibility(child));
+    }
     this.objectsLayer.addChildren(children);
   }
 
   _applyDrawableChanges() {
-    this.model.drawable.filter(path => {
+    // Keep color art below line art
+        Wick.ArtLayers.normalize(this.objectsLayer);
+
+        this.model.drawable.filter(path => {
       return path instanceof Wick.Path && path.isDynamicText;
     }).forEach(path => {
       path.view.item.bringToFront();
@@ -64099,7 +64618,8 @@ Wick.View.Path = class extends Wick.View {
 
 
   static exportJSON(item) {
-    // Recover original style (if needed - only neccesary if style was overritten by custom onion skin style)
+    Wick.ArtLayers.restoreVisibility(item);
+        // Recover original style (if needed - only neccesary if style was overritten by custom onion skin style)
     if (item.data.originalStyle) {
       item.strokeColor = item.data.originalStyle.strokeColor;
       item.fillColor = item.data.originalStyle.fillColor;

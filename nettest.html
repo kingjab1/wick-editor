@@ -1,0 +1,80 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Network check</title>
+<style>
+  body { font-family: -apple-system, Helvetica, Arial, sans-serif; background: #1f1f2b; color: #fff; margin: 0; padding: 24px; }
+  h1 { font-size: 26px; margin: 0 0 6px; }
+  p { color: #c9c9d6; margin: 0 0 18px; font-size: 16px; }
+  .row { display: flex; align-items: center; gap: 14px; background: #2c2c3c; border-radius: 12px; padding: 14px 16px; margin-bottom: 10px; font-size: 17px; }
+  .dot { width: 22px; height: 22px; border-radius: 50%; background: #777; flex: none; }
+  .ok .dot { background: #2ecc71; } .bad .dot { background: #e74c3c; }
+  .detail { color: #9a9ab0; font-size: 13px; margin-left: auto; text-align: right; max-width: 45%; word-break: break-word; }
+  #summary { font-size: 22px; font-weight: bold; margin: 20px 0 8px; }
+  button { font-size: 18px; padding: 12px 22px; border-radius: 10px; border: none; background: #5aa9e6; color: #fff; }
+</style>
+</head>
+<body>
+<h1>School network check</h1>
+<p>Load this on a school iPad, on school Wi-Fi, and take a screenshot when it finishes.</p>
+<div id="rows"></div>
+<div id="summary">Checking...</div>
+<p id="info"></p>
+<button onclick="location.reload()">Run again</button>
+<script>
+var checks = [
+  { name: 'This site (animate.jabari.art)', run: function () {
+      return fetch('index.html?nc=' + Date.now(), { cache: 'no-store' }).then(function (r) {
+        return r.text().then(function (t) { return r.ok && t.indexOf('Wick') !== -1; });
+      });
+  }},
+  { name: 'Save storage (Google Firestore)', run: function () {
+      return fetch('https://firestore.googleapis.com/v1/projects/animate-nettest/databases/(default)/documents/check/check')
+        .then(function (r) { return r.json(); })
+        .then(function (j) { return !!(j && j.error && j.error.status); });
+  }},
+  { name: 'Logins (Google Identity Toolkit)', run: function () {
+      return fetch('https://identitytoolkit.googleapis.com/v1/accounts:signUp?key=nettest', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: '{}' })
+        .then(function (r) { return r.json(); })
+        .then(function (j) { return !!(j && j.error && j.error.code); });
+  }},
+  { name: 'Staying logged in (Google Secure Token)', run: function () {
+      return fetch('https://securetoken.googleapis.com/v1/token?key=nettest', { method: 'POST', headers: { 'Content-Type': 'application/x-www-form-urlencoded' }, body: 'grant_type=refresh_token&refresh_token=x' })
+        .then(function (r) { return r.json(); })
+        .then(function (j) { return !!(j && j.error); });
+  }},
+  { name: 'Browser storage on this iPad', run: function () {
+      return new Promise(function (resolve) {
+        try {
+          var req = indexedDB.open('nettest', 1);
+          req.onsuccess = function () { req.result.close(); resolve(true); };
+          req.onerror = function () { resolve(false); };
+        } catch (e) { resolve(false); }
+      });
+  }},
+];
+var rows = document.getElementById('rows');
+var results = [];
+checks.forEach(function (c, i) {
+  var el = document.createElement('div'); el.className = 'row';
+  el.innerHTML = '<span class="dot"></span><span>' + c.name + '</span><span class="detail">checking</span>';
+  rows.appendChild(el);
+  var timer = new Promise(function (resolve) { setTimeout(function () { resolve('timeout'); }, 15000); });
+  results.push(Promise.race([c.run().then(function (ok) { return ok ? 'ok' : 'unexpected answer'; }, function (e) { return 'blocked (' + (e && e.message || 'error') + ')'; }), timer])
+    .then(function (res) {
+      var ok = res === 'ok';
+      el.className = 'row ' + (ok ? 'ok' : 'bad');
+      el.querySelector('.detail').textContent = ok ? 'works' : res;
+      return ok;
+    }));
+});
+Promise.all(results).then(function (r) {
+  var bad = r.filter(function (x) { return !x; }).length;
+  document.getElementById('summary').textContent = bad === 0 ? 'All good. Student saves should work here.' : bad + ' check(s) failed. Send Claude a screenshot.';
+  document.getElementById('info').textContent = 'Secure page: ' + (window.isSecureContext ? 'yes' : 'no') + ' · ' + new Date().toLocaleString() + ' · ' + navigator.userAgent;
+});
+</script>
+</body>
+</html>
